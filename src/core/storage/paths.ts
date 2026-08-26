@@ -1,9 +1,9 @@
 import os from 'node:os';
 import path from 'node:path';
-import { sanitizeBranchSlug } from '../../utils/hash.js';
+import { StorageMode } from '../types/config.js';
 
 export class StoragePaths {
-  public static getDefaultStorePath(): string {
+  public static getGlobalStorePath(): string {
     if (process.env.BRANCH_CONTEXT_STORE) {
       return path.resolve(process.env.BRANCH_CONTEXT_STORE).replace(/\\/g, '/');
     }
@@ -15,6 +15,31 @@ export class StoragePaths {
     }
 
     return path.join(homeDir, '.branch-render-context').replace(/\\/g, '/');
+  }
+
+  public static resolveStorePath(options: {
+    repoRoot?: string;
+    mode?: StorageMode;
+    customPath?: string;
+  } = {}): string {
+    if (options.customPath) {
+      return path.resolve(options.customPath).replace(/\\/g, '/');
+    }
+
+    if (options.mode === 'global') {
+      return StoragePaths.getGlobalStorePath();
+    }
+
+    // Default: repo-local
+    if (options.repoRoot) {
+      return path.join(path.resolve(options.repoRoot), '.branch-render-context').replace(/\\/g, '/');
+    }
+
+    return StoragePaths.getGlobalStorePath();
+  }
+
+  public static getDefaultStorePath(): string {
+    return StoragePaths.getGlobalStorePath();
   }
 
   public static getConfigPath(storePath: string): string {
@@ -57,12 +82,8 @@ export class StoragePaths {
     return path.join(StoragePaths.getBranchDir(storePath, repoId, branchId), 'document.json').replace(/\\/g, '/');
   }
 
-  /**
-   * Portable path stored in catalog metadata. Filesystem access must use
-   * getDocumentJsonPath instead; this path is intentionally relative.
-   */
   public static getRelativeDocumentJsonPath(repoId: string, branchId: string): string {
-    return path.join('repositories', repoId, 'branches', branchId, 'document.json').replace(/\\/g, '/');
+    return `repositories/${repoId}/branches/${branchId}/document.json`;
   }
 
   public static getStateJsonPath(storePath: string, repoId: string, branchId: string): string {

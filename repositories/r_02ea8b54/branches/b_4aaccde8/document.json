@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0.0",
+  "document_id": "doc_r_02ea8b54_b_4aaccde8",
+  "document_type": "branch-context",
+  "repository": {
+    "id": "r_02ea8b54",
+    "name": "wec.database"
+  },
+  "branch": {
+    "id": "b_4aaccde8",
+    "name": "hotfix/Eagers-BE/WCE-946-eagers"
+  },
+  "source": {
+    "base_ref": "release/eagers",
+    "base_commit": "8c702b9822ec37ff0507c1276194e4d45b87fc63",
+    "head_commit": "223bed2a29cf5a4bd8f841edde005c676568b8b4",
+    "working_tree_state": "clean",
+    "includes_uncommitted_changes": false
+  },
+  "freshness": {
+    "status": "FRESH",
+    "rendered_at": "2026-08-26T06:50:06.239Z",
+    "analyzer_version": "1.0.0",
+    "renderer_version": "1.0.0"
+  },
+  "content": {
+    "intent": {
+      "primary_goal": "Update CustomerOptOutDetailV to use cleaned phone numbers for opt-out details",
+      "commit_count": 2,
+      "authors": [
+        "DuyNinh"
+      ]
+    },
+    "scope": {
+      "total_files": 2,
+      "insertions": 62,
+      "deletions": 4,
+      "modules": [
+        "Codes/CRM_Tenant"
+      ]
+    },
+    "changes": [
+      {
+        "status": "M",
+        "path": "Codes/CRM_Tenant/Routines/Views/CustomerHistoryV.sql"
+      },
+      {
+        "status": "M",
+        "path": "Codes/CRM_Tenant/Routines/Views/CustomerOptOutDetailV.sql"
+      }
+    ],
+    "architecture": {
+      "affected_modules": [
+        "Codes/CRM_Tenant"
+      ],
+      "config_changes": [],
+      "doc_changes": []
+    },
+    "tests": {
+      "test_files": [],
+      "has_tests": false
+    },
+    "dependencies": [],
+    "risks": [],
+    "unknowns": [
+      "No tests detected for modified source files."
+    ],
+    "next_relevant_files": [
+      "Codes/CRM_Tenant/Routines/Views/CustomerHistoryV.sql",
+      "Codes/CRM_Tenant/Routines/Views/CustomerOptOutDetailV.sql"
+    ],
+    "summary": "Branch has 2 commits affecting 2 files (+62/-4)."
+  },
+  "evidence_refs": []
+}

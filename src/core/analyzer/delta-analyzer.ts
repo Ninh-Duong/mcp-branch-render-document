@@ -14,14 +14,14 @@ export class DeltaBranchAnalyzer {
 
   public async analyzeDelta(
     repoPath: string,
-    lastRenderedHead: string,
-    currentHead: string,
+    lastRenderedTargetCommit: string,
+    currentTargetCommit: string,
     existingContent: DocumentContent,
     secretPatterns: string[] = []
   ): Promise<DeltaAnalysisResult> {
-    const rawDeltaCommits = await this.git.getCommitsSince(repoPath, lastRenderedHead, currentHead);
-    const rawDeltaFiles = await this.git.getChangedFilesSince(repoPath, lastRenderedHead, currentHead);
-    const deltaDiffStat = await this.git.getDiffStat(repoPath, lastRenderedHead, currentHead);
+    const rawDeltaCommits = await this.git.getCommitsSince(repoPath, lastRenderedTargetCommit, currentTargetCommit);
+    const rawDeltaFiles = await this.git.getChangedFilesSince(repoPath, lastRenderedTargetCommit, currentTargetCommit);
+    const deltaDiffStat = await this.git.getDiffStat(repoPath, lastRenderedTargetCommit, currentTargetCommit);
 
     const deltaCommits = rawDeltaCommits.map((c) => ({
       ...c,
@@ -31,6 +31,18 @@ export class DeltaBranchAnalyzer {
     const deltaChangedFiles = rawDeltaFiles.filter(
       (f) => !SecretRedactor.isSecretFile(f.path, secretPatterns)
     );
+
+    // Merge commits list (prevent duplicate hashes)
+    const existingCommits = existingContent.commits || [];
+    const existingHashes = new Set(existingCommits.map((c) => c.hash));
+    const mergedCommits = [...existingCommits];
+
+    for (const commit of deltaCommits) {
+      if (!existingHashes.has(commit.hash)) {
+        mergedCommits.push(commit);
+        existingHashes.add(commit.hash);
+      }
+    }
 
     // Merge changes: existing changes map updated with delta
     const changesMap = new Map<string, any>();
@@ -90,10 +102,11 @@ export class DeltaBranchAnalyzer {
       intent: {
         ...existingContent.intent,
         primary_goal: deltaCommits[deltaCommits.length - 1]?.subject || existingContent.intent?.primary_goal,
-        commit_count: ((existingContent.intent?.commit_count as number) || 0) + deltaCommits.length,
+        commit_count: mergedCommits.length,
         authors: mergedAuthors,
         last_delta_commits: deltaCommits.map((c) => c.subject),
       },
+      commits: mergedCommits,
       scope: {
         ...existingContent.scope,
         total_files: mergedChanges.length,
@@ -112,7 +125,7 @@ export class DeltaBranchAnalyzer {
       risks: Array.from(risks),
       unknowns: existingContent.unknowns || [],
       next_relevant_files: mergedNextFiles,
-      summary: `Incrementally updated: +${deltaCommits.length} commits, ${deltaChangedFiles.length} files changed (+${deltaDiffStat.insertions}/-${deltaDiffStat.deletions}). Total active changes: ${mergedChanges.length} files.`,
+      summary: `Incrementally updated: +${deltaCommits.length} commits, ${deltaChangedFiles.length} files changed (+${deltaDiffStat.insertions}/-${deltaDiffStat.deletions}). Total commits: ${mergedCommits.length}, active changed files: ${mergedChanges.length}.`,
     };
 
     return {

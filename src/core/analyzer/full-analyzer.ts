@@ -15,12 +15,49 @@ export class FullBranchAnalyzer {
   public async analyze(
     repoPath: string,
     baseCommit: string,
-    headCommit: string,
+    targetCommit: string,
     secretPatterns: string[] = []
   ): Promise<FullAnalysisResult> {
-    const rawCommits = await this.git.getCommitsSince(repoPath, baseCommit, headCommit);
-    const rawFiles = await this.git.getChangedFilesSince(repoPath, baseCommit, headCommit);
-    const diffStat = await this.git.getDiffStat(repoPath, baseCommit, headCommit);
+    if (baseCommit === targetCommit) {
+      return {
+        commits: [],
+        changedFiles: [],
+        diffStat: { filesChanged: 0, insertions: 0, deletions: 0 },
+        content: {
+          intent: {
+            primary_goal: 'No difference between target branch and base branch',
+            commit_count: 0,
+            authors: [],
+          },
+          commits: [],
+          scope: {
+            total_files: 0,
+            insertions: 0,
+            deletions: 0,
+            modules: [],
+          },
+          changes: [],
+          architecture: {
+            affected_modules: [],
+            config_changes: [],
+            doc_changes: [],
+          },
+          tests: {
+            test_files: [],
+            has_tests: false,
+          },
+          dependencies: [],
+          risks: [],
+          unknowns: [],
+          next_relevant_files: [],
+          summary: 'Target branch is up to date with base branch (0 commits, 0 files changed).',
+        },
+      };
+    }
+
+    const rawCommits = await this.git.getCommitsSince(repoPath, baseCommit, targetCommit);
+    const rawFiles = await this.git.getChangedFilesSince(repoPath, baseCommit, targetCommit);
+    const diffStat = await this.git.getDiffStat(repoPath, baseCommit, targetCommit);
 
     // Redact secret files and commit messages
     const commits = rawCommits.map((c) => ({
@@ -112,6 +149,7 @@ export class FullBranchAnalyzer {
 
     const content: DocumentContent = {
       intent,
+      commits,
       scope,
       changes: changedFiles.map((f) => ({
         status: f.status,

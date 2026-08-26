@@ -1,16 +1,13 @@
 import { input, select, confirm } from '@inquirer/prompts';
 import { GitAdapter } from '../core/git/index.js';
-import { StorageRegistry, StoragePaths } from '../core/storage/index.js';
-import { Config, RefreshScope, RendererMode } from '../core/types/index.js';
-import path from 'node:path';
+import { RefreshScope, RendererMode } from '../core/types/index.js';
 
 export interface WizardAnswers {
   repoPath: string;
-  branchName: string;
-  baseRef: string;
-  storagePath: string;
+  targetBranch: string;
+  checkoutBranch: string;
+  storagePath?: string;
   refreshScope: RefreshScope;
-  includeWorkingTree: boolean;
   rendererMode: RendererMode;
   saveConfig: boolean;
   startNow: boolean;
@@ -39,89 +36,89 @@ export class TerminalWizard {
       }
     }
 
-    // Load existing config if available
-    const defaultStorage = initialStorePath || StoragePaths.getDefaultStorePath();
-    const registry = new StorageRegistry(defaultStorage);
-    const savedConfig = await registry.loadConfig();
-
-    // 2. Branch
-    const branchInfo = await this.git.getCurrentBranch(repoRoot);
-    let selectedBranch = branchInfo.branchName;
-
-    if (branchInfo.isDetached) {
-      const continueDetached = await confirm({
-        message: `Current checkout is detached HEAD (${branchInfo.headCommit.slice(0, 8)}). Continue with commit-based context?`,
-        default: true,
-      });
-      if (!continueDetached) {
-        process.exit(0);
-      }
-    } else {
-      selectedBranch = await input({
-        message: 'Branch:',
-        default: branchInfo.branchName,
-      });
+    // 2. Detect Checkout Branch
+    const checkout = await this.git.getCurrentCheckout(repoRoot);
+    if (checkout.isDetached) {
+      throw new Error(
+        'Current checkout is detached HEAD. Please checkout a base branch (e.g. main, release/...) before running wizard.'
+      );
     }
 
-    // 3. Base ref
-    let resolvedBaseRef = '';
-    const preferredBaseCandidate = savedConfig.default_base_ref || 'origin/main';
-    while (!resolvedBaseRef) {
-      const baseInput = await input({
-        message: 'Base branch/ref:',
-        default: preferredBaseCandidate,
+    console.log(`\n\x1b[32m✔\x1b[0m Detected checkout (base) branch: \x1b[36m${checkout.branchName}\x1b[0m\n`);
+
+    // 3. Target Branch
+    let targetBranch = '';
+    while (!targetBranch) {
+      const targetInput = await input({
+        message: 'Target branch to analyze:',
+        default: checkout.branchName,
       });
 
       try {
-        const { baseRef } = await this.git.resolveBaseRef(repoRoot, baseInput);
-        resolvedBaseRef = baseRef;
+        await this.git.resolveBranchRef(repoRoot, targetInput);
+        targetBranch = targetInput.trim();
       } catch (err: any) {
         console.error(`\x1b[31mError: ${err.message}\x1b[0m`);
       }
     }
 
-    // 4. Storage path
-    const storagePath = await input({
-      message: 'Branch Context storage path:',
-      default: savedConfig.storage_path || defaultStorage,
-    });
-
-    // 5. Refresh scope
+    // 4. Refresh scope
     const refreshScope = (await select({
       message: 'Refresh scope:',
       choices: [
-        { name: 'current (Render only current branch)', value: 'current' },
-        { name: 'stale   (Render all stale branches)', value: 'stale' },
-        { name: 'all     (Render all branches)', value: 'all' },
+        { name: 'current (Render target branch)', value: 'current' },
+        { name: 'stale   (Render all stale branches in catalog)', value: 'stale' },
+        { name: 'all     (Render all branches in catalog)', value: 'all' },
         { name: 'none    (Scan and show status only)', value: 'none' },
       ],
       default: 'current',
     })) as RefreshScope;
 
-    // 6. Include working tree
-    const includeWorkingTree = await confirm({
-      message: 'Include staged/unstaged/untracked changes?',
-      default: savedConfig.include_working_tree ?? true,
+    // 5. Ask for advanced options only if needed
+    const showAdvanced = await confirm({
+      message: 'Configure advanced options (storage mode, renderer)?',
+      default: false,
     });
 
-    // 7. Renderer mode
-    const rendererMode = (await select({
-      message: 'Renderer mode:',
-      choices: [
-        { name: 'deterministic (Fast AST, stats & git metadata)', value: 'deterministic' },
-        { name: 'agent-assisted (Collects rich evidence for AI Agent)', value: 'agent-assisted' },
-        { name: 'external-model (Calls configured external LLM)', value: 'external-model' },
-      ],
-      default: savedConfig.default_renderer_mode || 'deterministic',
-    })) as RendererMode;
+    let storagePath = initialStorePath;
+    let rendererMode: RendererMode = 'deterministic';
 
-    // 8. Save settings
+    if (showAdvanced) {
+      const storageModeChoice = await select({
+        message: 'Storage mode:',
+        choices: [
+          { name: 'repo-local (Default: .branch-render-context/ in repo root)', value: 'repo-local' },
+          { name: 'global     (OS AppData / User config dir)', value: 'global' },
+          { name: 'custom     (Specify custom directory path)', value: 'custom' },
+        ],
+        default: 'repo-local',
+      });
+
+      if (storageModeChoice === 'custom') {
+        storagePath = await input({
+          message: 'Custom storage path:',
+        });
+      } else if (storageModeChoice === 'global') {
+        storagePath = undefined;
+      }
+
+      rendererMode = (await select({
+        message: 'Renderer mode:',
+        choices: [
+          { name: 'deterministic (Fast AST, diff stats & git metadata)', value: 'deterministic' },
+          { name: 'agent-assisted (Collects rich evidence for AI Agent)', value: 'agent-assisted' },
+        ],
+        default: 'deterministic',
+      })) as RendererMode;
+    }
+
+    // 6. Save settings
     const saveSettings = await confirm({
       message: 'Save these settings to config.json?',
       default: true,
     });
 
-    // 9. Start rendering now
+    // 7. Start rendering now
     const startNow = await confirm({
       message: 'Start rendering now?',
       default: true,
@@ -129,11 +126,10 @@ export class TerminalWizard {
 
     return {
       repoPath: repoRoot,
-      branchName: selectedBranch,
-      baseRef: resolvedBaseRef,
+      targetBranch,
+      checkoutBranch: checkout.branchName,
       storagePath,
       refreshScope,
-      includeWorkingTree,
       rendererMode,
       saveConfig: saveSettings,
       startNow,

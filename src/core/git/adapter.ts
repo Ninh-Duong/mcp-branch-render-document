@@ -16,15 +16,17 @@ import { Logger } from '../../utils/logger.js';
 
 const execFileAsync = promisify(execFile);
 
-export interface GitBranchInfo {
+export interface CheckoutInfo {
   branchName: string;
-  isDetached: boolean;
   headCommit: string;
+  isDetached: boolean;
 }
 
-export interface GitBaseRefInfo {
-  baseRef: string;
-  baseCommit: string;
+export interface ResolvedBranchRef {
+  requestedRef: string;
+  resolvedRef: string;
+  commit: string;
+  isRemote: boolean;
 }
 
 export interface WorkingTreeStatus {
@@ -58,10 +60,9 @@ export class GitAdapter {
         windowsHide: true,
         env: {
           ...process.env,
-          // Force standard locale and date formatting for consistent parsing
           LC_ALL: 'C',
           LANG: 'C',
-          GIT_TERMINAL_PROMPT: '0', // never prompt for password in headless
+          GIT_TERMINAL_PROMPT: '0',
         },
       });
 
@@ -89,9 +90,9 @@ export class GitAdapter {
   }
 
   /**
-   * Get current branch name, head commit and whether HEAD is detached
+   * Get current checkout branch, HEAD commit, and detached status
    */
-  public async getCurrentBranch(repoPath: string): Promise<GitBranchInfo> {
+  public async getCurrentCheckout(repoPath: string): Promise<CheckoutInfo> {
     const headCommit = await this.getHeadCommit(repoPath);
 
     try {
@@ -100,24 +101,66 @@ export class GitAdapter {
 
       if (!branchName) {
         return {
-          branchName: `detached-${headCommit.slice(0, 8)}`,
-          isDetached: true,
+          branchName: '',
           headCommit,
+          isDetached: true,
         };
       }
 
       return {
         branchName,
-        isDetached: false,
         headCommit,
+        isDetached: false,
       };
     } catch {
       return {
-        branchName: `detached-${headCommit.slice(0, 8)}`,
-        isDetached: true,
+        branchName: '',
         headCommit,
+        isDetached: true,
       };
     }
+  }
+
+  /**
+   * Resolve branch ref without silent fallback
+   * Resolution order:
+   * 1. refs/heads/<branchName>
+   * 2. exact ref / commit
+   * 3. refs/remotes/origin/<branchName>
+   */
+  public async resolveBranchRef(repoPath: string, branchName: string): Promise<ResolvedBranchRef> {
+    if (!branchName || !branchName.trim()) {
+      throw new Error('Branch name cannot be empty.');
+    }
+
+    const trimmed = branchName.trim();
+    const candidates = [
+      { ref: `refs/heads/${trimmed}`, isRemote: false },
+      { ref: trimmed, isRemote: false },
+      { ref: `refs/remotes/origin/${trimmed}`, isRemote: true },
+      { ref: `origin/${trimmed}`, isRemote: true },
+    ];
+
+    for (const candidate of candidates) {
+      try {
+        const { stdout } = await this.runGit(['rev-parse', '--verify', candidate.ref], repoPath);
+        const commit = stdout.trim();
+        if (commit) {
+          return {
+            requestedRef: trimmed,
+            resolvedRef: candidate.ref,
+            commit,
+            isRemote: candidate.isRemote,
+          };
+        }
+      } catch {
+        // Try next candidate
+      }
+    }
+
+    throw new Error(
+      `Target branch was not found: "${trimmed}". Checked local refs and origin remote refs.`
+    );
   }
 
   /**
@@ -148,46 +191,6 @@ export class GitAdapter {
     } catch {
       return [];
     }
-  }
-
-  /**
-   * Resolve base ref commit following resolution rules:
-   * 1. User preferred base
-   * 2. origin/main
-   * 3. main
-   * 4. origin/master
-   * 5. master
-   */
-  public async resolveBaseRef(
-    repoPath: string,
-    preferredBase?: string
-  ): Promise<GitBaseRefInfo> {
-    const candidates = [
-      preferredBase,
-      'origin/main',
-      'main',
-      'origin/master',
-      'master',
-    ].filter(Boolean) as string[];
-
-    for (const candidate of candidates) {
-      try {
-        const { stdout } = await this.runGit(['rev-parse', '--verify', candidate], repoPath);
-        const baseCommit = stdout.trim();
-        if (baseCommit) {
-          return {
-            baseRef: candidate,
-            baseCommit,
-          };
-        }
-      } catch {
-        // Continue to next candidate
-      }
-    }
-
-    throw new Error(
-      `Could not resolve base ref. Checked candidates: ${candidates.join(', ')}. Please specify a valid base ref.`
-    );
   }
 
   /**
@@ -251,7 +254,7 @@ export class GitAdapter {
   public async getCommitsSince(
     repoPath: string,
     fromCommit: string,
-    toCommit: string = 'HEAD'
+    toCommit: string
   ): Promise<CommitInfo[]> {
     if (fromCommit === toCommit) {
       return [];
@@ -271,7 +274,7 @@ export class GitAdapter {
   public async getChangedFilesSince(
     repoPath: string,
     fromCommit: string,
-    toCommit: string = 'HEAD'
+    toCommit: string
   ): Promise<ChangedFileInfo[]> {
     if (fromCommit === toCommit) {
       return [];
@@ -286,12 +289,12 @@ export class GitAdapter {
   }
 
   /**
-   * Get diffstat summary
+   * Get diffstat summary between fromCommit and toCommit
    */
   public async getDiffStat(
     repoPath: string,
     fromCommit: string,
-    toCommit: string = 'HEAD'
+    toCommit: string
   ): Promise<DiffStat> {
     if (fromCommit === toCommit) {
       return { filesChanged: 0, insertions: 0, deletions: 0 };
@@ -311,7 +314,7 @@ export class GitAdapter {
   public async getDiffPatch(
     repoPath: string,
     fromCommit: string,
-    toCommit: string = 'HEAD',
+    toCommit: string,
     maxBytes: number = 5 * 1024 * 1024
   ): Promise<{ patch: string; truncated: boolean }> {
     if (fromCommit === toCommit) {

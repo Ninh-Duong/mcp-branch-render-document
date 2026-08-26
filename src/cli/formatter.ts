@@ -1,5 +1,5 @@
 import { BranchContextResult } from '../core/orchestrator.js';
-import { Catalog, FreshnessStatus } from '../core/types/index.js';
+import { FreshnessStatus } from '../core/types/index.js';
 
 export class CLIFormatter {
   public static formatStatus(status: FreshnessStatus): string {
@@ -23,8 +23,7 @@ export class CLIFormatter {
 
   public static printBranchList(
     repoName: string,
-    currentBranch: string,
-    baseRef: string,
+    checkoutBranch: string,
     branches: Array<{
       branch_name: string;
       status: FreshnessStatus;
@@ -32,9 +31,8 @@ export class CLIFormatter {
       isCurrent?: boolean;
     }>
   ): void {
-    console.log(`\nRepository: \x1b[36m${repoName}\x1b[0m`);
-    console.log(`Current branch: \x1b[36m${currentBranch}\x1b[0m`);
-    console.log(`Base ref: \x1b[36m${baseRef}\x1b[0m\n`);
+    console.log(`\nRepository:      \x1b[36m${repoName}\x1b[0m`);
+    console.log(`Checkout branch: \x1b[36m${checkoutBranch}\x1b[0m\n`);
 
     console.log('Branch documents:');
     console.log('─────────────────────────────────────────────────────────────────');
@@ -43,7 +41,7 @@ export class CLIFormatter {
     } else {
       branches.forEach((b, idx) => {
         const marker = b.isCurrent ? ' *' : '  ';
-        const namePad = b.branch_name.padEnd(28, ' ');
+        const namePad = b.branch_name.padEnd(32, ' ');
         const statusFormatted = CLIFormatter.formatStatus(b.status).padEnd(30, ' ');
         const detail = b.detail || '';
         console.log(`${marker} ${idx + 1}. ${namePad} ${statusFormatted} ${detail}`);
@@ -53,16 +51,24 @@ export class CLIFormatter {
   }
 
   public static printRefreshSummary(result: BranchContextResult): void {
-    console.log(`\nRefreshing branch: \x1b[36m${result.branch.branch_name}\x1b[0m`);
-    console.log('\nGit changes:');
-    console.log(`- New commits: ${result.state.new_commits_count}`);
-    console.log(`- Changed files: ${result.state.changed_files_count}`);
-    console.log(`- Working tree: ${result.state.current_worktree_fingerprint === 'clean' ? 'clean' : 'dirty'}`);
-
-    console.log('\nDocument path:');
-    console.log(`\x1b[32m${result.branch.document_path}\x1b[0m`);
-
-    console.log(`\nStatus: \x1b[32mSUCCESS\x1b[0m`);
-    console.log(`Document is now based on HEAD \x1b[33m${result.state.current_head.slice(0, 8)}\x1b[0m\n`);
+    console.log('\n=================================================================');
+    console.log(`Target branch:   \x1b[36m${result.target_branch}\x1b[0m`);
+    console.log(`Checkout branch: \x1b[33m${result.checkout_branch}\x1b[0m`);
+    console.log(`Base branch:     \x1b[33m${result.base_branch}\x1b[0m`);
+    console.log(`Comparison:      \x1b[35m${result.comparison}\x1b[0m`);
+    console.log(`Target commit:   ${result.target_commit.slice(0, 8)}`);
+    console.log(`Base commit:     ${result.base_commit.slice(0, 8)}`);
+    console.log(`Strategy:        \x1b[32m${result.strategy}\x1b[0m`);
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('Metrics:');
+    console.log(`- Commits:        ${result.rendered_commits_count}`);
+    console.log(`- Changed files:  ${result.changed_files_count}`);
+    console.log(`- Insertions:     \x1b[32m+${result.insertions}\x1b[0m`);
+    console.log(`- Deletions:      \x1b[31m-${result.deletions}\x1b[0m`);
+    console.log(`- Worktree dirty: ${result.checkout_worktree_included ? 'included' : 'ignored (clean isolation)'}`);
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('Document path:');
+    console.log(`\x1b[32m${result.document_path}\x1b[0m`);
+    console.log('=================================================================\n');
   }
 }

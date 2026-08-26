@@ -1,184 +1,113 @@
-# MCP Branch Render Document
+# Automatic PR Branch Document Renderer (Branch Render Context MCP)
 
-MCP Server và CLI này tạo một **branch context document** để AI Agent hiểu branch hiện tại mà không phải đọc lại toàn bộ repository ở mỗi prompt.
+**Automatic PR Branch Document Renderer** là hệ thống MCP Server & CLI chuyên dụng giúp tự động phân tích và kết xuất ngữ cảnh PR branch / target branch so với branch hiện tại (checkout base branch), lưu trữ document cục bộ trong repo (`.branch-render-context/`), tự động cập nhật `.gitignore`, và đồng bộ lũy tiến cho AI Agent.
 
-Mỗi repository/branch có một document duy nhất. Khi branch có commit mới, document cũ được cập nhật tại chỗ và không tạo thêm document thứ hai.
+---
 
-## Feature làm gì?
+## 🎯 Điểm Nổi Bật Của Workflow Mới
 
-- Phát hiện repository và branch hiện tại.
-- Đọc Git HEAD, base ref, commit mới và working tree.
-- Tạo context document dạng `document.json`.
-- Phát hiện document đã stale sau khi code và commit mới.
-- Incremental update khi có commit mới.
-- Full rebuild khi branch bị rebase, reset hoặc base ref thay đổi.
-- Không trả context stale ở freshness mode mặc định `required`.
-- Lưu dữ liệu branch ngoài source repository theo mặc định.
-- Tự kiểm tra và cài dependency còn thiếu khi chạy command.
+1. **Chỉ Cần Nhập Target Branch**:
+   - Khi repository đang checkout ở `release/eagers` và bạn chỉ định `hotfix/Eagers-BE/WCE-946-eagers`, hệ thống tự động hiểu:
+     - `baseBranch`: `release/eagers` (từ checkout hiện tại)
+     - `targetBranch`: `hotfix/Eagers-BE/WCE-946-eagers`
+     - Phép so sánh: `release/eagers..hotfix/Eagers-BE/WCE-946-eagers`
+2. **Tuyệt Đối KHÔNG Switch Branch**:
+   - Working tree của developer luôn giữ nguyên branch hiện tại. Không bao giờ tự ý `git checkout` hay `git switch`.
+3. **Target Commit Resolve Độc Lập**:
+   - Commit của target branch được resolve từ local ref hoặc remote ref (`origin/...`), không lấy nhầm HEAD hiện tại.
+4. **Cách Ly Working Tree (Clean Isolation)**:
+   - Khi target branch khác checkout branch, các thay đổi dirty trên checkout branch sẽ không bị đưa vào document của target branch.
+5. **Kho Lưu Trữ Cục Bộ Repo (`repo-local`) & Tự Động `.gitignore`**:
+   - Mặc định lưu trữ tại `<repo-root>/.branch-render-context/`.
+   - Tự động thêm `/.branch-render-context/` vào `.gitignore` một cách idempotent, không duplicate, không ghi đè rule khác.
+6. **Lưu Trữ Danh Sách Commits Đầy Đủ**:
+   - `document.json` lưu toàn bộ danh sách commits (kèm che giấu thông tin nhạy cảm - secret redaction).
+7. **Đầy Đủ Diff Metrics trong Response**:
+   - Trả về chi tiết: `rendered_commits_count`, `changed_files_count`, `insertions`, `deletions`.
 
-## Yêu cầu
+---
 
-- Node.js `>=22.12.0`
-- npm
-- Git
+## 🛠️ Hướng Dẫn Sử Dụng CLI
 
-Khi chạy các npm script, feature sẽ kiểm tra `package.json`, `package-lock.json` và `node_modules`. Nếu thiếu package hoặc lockfile lệch, feature sẽ chạy `npm ci` hoặc `npm install` tương ứng.
-
-Tắt tự động cài dependency khi cần:
-
-```powershell
-$env:BRANCH_RENDER_SKIP_INSTALL = "1"
+### 1. Phân tích Target Branch qua CLI
+```bash
+# Phân tích target branch so với branch đang checkout
+npm run branch-render:refresh -- --branch hotfix/Eagers-BE/WCE-946-eagers
 ```
 
-## Cài đặt
+Output:
+```text
+=================================================================
+Target branch:   hotfix/Eagers-BE/WCE-946-eagers
+Checkout branch: release/eagers
+Base branch:     release/eagers
+Comparison:      release/eagers..hotfix/Eagers-BE/WCE-946-eagers
+Target commit:   223bed2a
+Base commit:     8c702b98
+Strategy:        full
+─────────────────────────────────────────────────────────────────
+Metrics:
+- Commits:        2
+- Changed files:  2
+- Insertions:     +62
+- Deletions:      -4
+- Worktree dirty: ignored (clean isolation)
+─────────────────────────────────────────────────────────────────
+Document path:
+.branch-render-context/repositories/r_a13f92c1/branches/b_91a2/document.json
+=================================================================
+```
 
-Clone repository rồi chạy command mong muốn. Không cần cài package thủ công trước:
-
+### 2. Interactive Terminal Wizard
 ```bash
 npm run branch-render:start
 ```
+Wizard tự động phát hiện checkout branch và hỏi bạn target branch cần render.
 
-Hoặc cài rõ ràng trước:
-
+### 3. Kiểm Tra Freshness
 ```bash
-npm run setup
-npm run build
+npm run branch-render:status -- --branch hotfix/Eagers-BE/WCE-946-eagers
 ```
 
-## Sử dụng CLI
-
-### Khởi động interactive wizard
-
-```bash
-npm run branch-render:start
-```
-
-Wizard hỏi tuần tự:
-
-1. Repository path.
-2. Branch.
-3. Base ref, ví dụ `origin/main` hoặc `main`.
-4. Storage path.
-5. Refresh scope: `current`, `stale`, `all`, `none`.
-6. Có include staged/unstaged/untracked changes hay không.
-7. Renderer mode.
-8. Có lưu cấu hình hay không.
-9. Có render ngay hay không.
-
-### Chạy không tương tác
-
-```bash
-npm run branch-render:start -- --non-interactive --repo . --refresh current
-```
-
-### Liệt kê branch documents
-
+### 4. Liệt Kê Danh Mục Document Đã Lưu
 ```bash
 npm run branch-render:list
 ```
 
-### Kiểm tra freshness
+---
 
-```bash
-npm run branch-render:status -- --repo .
-```
+## 🤖 MCP Server Tools
 
-### Refresh document hiện tại
-
-```bash
-npm run branch-render:refresh -- --repo .
-```
-
-Force refresh:
-
-```bash
-npm run branch-render:refresh -- --repo . --force
-```
-
-## Cấu hình
-
-Storage mặc định nằm ngoài source repository theo thư mục AppData của hệ điều hành. Có thể chỉ định storage bằng wizard, CLI hoặc biến môi trường:
-
-```powershell
-$env:BRANCH_CONTEXT_STORE = ".branch-render-context"
-```
-
-Cấu hình được lưu trong `config.json` của storage. Giá trị `storage_path` được ghi dưới dạng placeholder tương đối; đường dẫn runtime được lấy từ storage đang mở nên không phụ thuộc vào máy đã tạo config.
-
-Các đường dẫn tuyệt đối chỉ được tạo tạm thời trong runtime để Git và filesystem hoạt động. Chúng không được hardcode trong source và không được ghi vào branch metadata.
-
-Các option chính:
-
+Cấu hình MCP Server trong file config của bạn:
 ```json
 {
-  "default_base_ref": "origin/main",
-  "default_refresh_scope": "current",
-  "include_working_tree": true,
-  "default_renderer_mode": "deterministic",
-  "default_freshness_mode": "required",
-  "max_diff_bytes": 5242880,
-  "secret_patterns": [
-    "**/.env*",
-    "**/*.pem",
-    "**/*.key",
-    "**/credentials*",
-    "**/secrets*"
-  ]
+  "mcpServers": {
+    "branch-render-context": {
+      "command": "node",
+      "args": ["<path-to-mcp-branch-render-document>/dist/index.js"]
+    }
+  }
 }
 ```
 
-## Storage document
+### Danh sách Tools:
 
-Storage có cấu trúc:
+| Tool Name | Mô tả |
+|---|---|
+| `branch_context_start` | Khởi tạo session, quét catalog và kiểm tra target branch |
+| `branch_context_list` | Liệt kê tất cả repositories và branch documents đã đăng ký |
+| `branch_context_status` | Kiểm tra Git freshness mà không render |
+| `branch_context_get` | Đọc `document.json` với chính sách freshness (`required` mặc định, `auto`, `check_only`, `allow_stale`) |
+| `branch_context_refresh` | Trigger cập nhật lũy tiến hoặc full rebuild cho target branch |
 
-```text
-<BRANCH_CONTEXT_STORE>/
-├── config.json
-├── catalog.json
-└── repositories/
-    └── r_<repository-id>/
-        └── branches/
-            └── b_<branch-id>/
-                ├── branch.json
-                ├── document.json
-                ├── state.json
-                ├── history.jsonl
-                └── evidence/
-```
+---
 
-`document.json` là document duy nhất AI Agent cần đọc. `state.json` lưu HEAD đã render, HEAD hiện tại và freshness. `history.jsonl` chỉ là metadata audit, không chứa các bản document cũ.
-
-Dữ liệu branch/context có thể chứa thông tin nội bộ nên không được commit vào source repository. Các tên storage phổ biến đã được thêm vào `.gitignore`.
-
-## MCP Server
-
-Build trước:
+## 🧪 Testing
 
 ```bash
-npm run build
-```
-
-Start MCP bằng stdio:
-
-```bash
-npm run mcp:start
-```
-
-MCP tools:
-
-- `branch_context_start`: khởi tạo hoặc load branch context.
-- `branch_context_list`: liệt kê repository và branch documents.
-- `branch_context_status`: kiểm tra freshness mà không render.
-- `branch_context_get`: đọc document với freshness policy.
-- `branch_context_refresh`: cập nhật document hiện tại.
-
-`branch_context_get` dùng `freshness: "required"` mặc định. Nếu document stale, Agent phải refresh trước khi sử dụng.
-
-## Kiểm tra
-
-```bash
-npm run build
+# Chạy Vitest test suite
 npm test
-```
 
-Nếu môi trường sandbox không cho Vitest tạo file tạm trong `node_modules`, chạy test trong terminal có quyền ghi hoặc sửa quyền của thư mục project.
+# Build TypeScript
+npm run build
+```

@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0.0",
+  "storage_path": ".",
+  "default_base_ref": "release/eagers",
+  "default_refresh_scope": "current",
+  "include_working_tree": true,
+  "default_renderer_mode": "deterministic",
+  "default_freshness_mode": "required",
+  "max_diff_bytes": 5242880,
+  "secret_patterns": [
+    "**/.env*",
+    "**/*.pem",
+    "**/*.key",
+    "**/id_rsa*",
+    "**/credentials*",
+    "**/secrets*"
+  ]
+}

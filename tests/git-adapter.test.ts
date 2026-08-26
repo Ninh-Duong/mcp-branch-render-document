@@ -17,20 +17,27 @@ describe('GitAdapter', () => {
     await fixture.cleanup();
   });
 
-  it('should detect repository root and current branch', async () => {
+  it('should detect repository root and current checkout', async () => {
     const root = await git.getRepositoryRoot(fixture.repoPath);
     expect(root.toLowerCase()).toBe(fixture.repoPath.toLowerCase());
 
-    const branchInfo = await git.getCurrentBranch(fixture.repoPath);
-    expect(branchInfo.branchName).toBe('main');
-    expect(branchInfo.isDetached).toBe(false);
-    expect(branchInfo.headCommit).toHaveLength(40);
+    const checkout = await git.getCurrentCheckout(fixture.repoPath);
+    expect(checkout.branchName).toBe('main');
+    expect(checkout.isDetached).toBe(false);
+    expect(checkout.headCommit).toHaveLength(40);
   });
 
-  it('should resolve base ref', async () => {
-    const base = await git.resolveBaseRef(fixture.repoPath, 'main');
-    expect(base.baseRef).toBe('main');
-    expect(base.baseCommit).toHaveLength(40);
+  it('should resolve branch ref with resolveBranchRef', async () => {
+    await fixture.run(['checkout', '-b', 'feature/resolve-test']);
+    const resolved = await git.resolveBranchRef(fixture.repoPath, 'feature/resolve-test');
+    expect(resolved.requestedRef).toBe('feature/resolve-test');
+    expect(resolved.commit).toHaveLength(40);
+  });
+
+  it('should throw error when resolving non-existent branch without fallback', async () => {
+    await expect(git.resolveBranchRef(fixture.repoPath, 'does-not-exist')).rejects.toThrow(
+      'Target branch was not found: "does-not-exist"'
+    );
   });
 
   it('should detect working tree clean status and fingerprint', async () => {
@@ -54,13 +61,13 @@ describe('GitAdapter', () => {
     await fixture.run(['commit', '-m', 'feat: add file1']);
 
     const head = await git.getHeadCommit(fixture.repoPath);
-    const base = await git.resolveBaseRef(fixture.repoPath, 'main');
+    const mainCheckout = await git.resolveBranchRef(fixture.repoPath, 'main');
 
-    const commits = await git.getCommitsSince(fixture.repoPath, base.baseCommit, head);
+    const commits = await git.getCommitsSince(fixture.repoPath, mainCheckout.commit, head);
     expect(commits).toHaveLength(1);
     expect(commits[0].subject).toBe('feat: add file1');
 
-    const files = await git.getChangedFilesSince(fixture.repoPath, base.baseCommit, head);
+    const files = await git.getChangedFilesSince(fixture.repoPath, mainCheckout.commit, head);
     expect(files).toHaveLength(1);
     expect(files[0].path).toBe('file1.ts');
   });

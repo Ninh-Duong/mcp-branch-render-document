@@ -4,59 +4,51 @@ import { TerminalWizard } from './wizard.js';
 import { BranchContextOrchestrator } from '../core/orchestrator.js';
 import { CLIFormatter } from './formatter.js';
 import { RefreshScope, RendererMode } from '../core/types/index.js';
-import { StoragePaths } from '../core/storage/index.js';
 
 const program = new Command();
 
 program
   .name('branch-render')
-  .description('Branch Render Context - Efficient context caching and incremental updates for AI Agents')
-  .version('1.0.0');
+  .description('Automatic PR Branch Document Renderer - Context caching & incremental git updates for AI agents')
+  .version('1.1.0');
 
 // --- START COMMAND ---
 program
   .command('start')
-  .description('Start interactive wizard or non-interactive rendering')
+  .description('Start interactive wizard or non-interactive PR branch rendering')
   .option('-n, --non-interactive', 'Run without interactive prompts')
   .option('-r, --repo <path>', 'Repository path', '.')
-  .option('-b, --branch <name>', 'Branch name')
-  .option('--base <ref>', 'Base ref/branch')
-  .option('-s, --storage <path>', 'Storage path')
+  .option('-b, --branch <name>', 'Target branch name')
+  .option('-s, --storage <path>', 'Storage path (default: repo-local .branch-render-context)')
   .option('--refresh <scope>', 'Refresh scope (current, stale, all, none)', 'current')
-  .option('--working-tree <boolean>', 'Include working tree changes', true)
-  .option('--mode <mode>', 'Renderer mode (deterministic, agent-assisted, external-model)', 'deterministic')
+  .option('-f, --force', 'Force refresh even if already fresh', false)
   .action(async (options) => {
     try {
       let repoPath = options.repo;
-      let branchName = options.branch;
-      let baseRef = options.base;
+      let targetBranch = options.branch;
       let storagePath = options.storage;
       let refreshScope: RefreshScope = options.refresh as RefreshScope;
-      let rendererMode: RendererMode = options.mode as RendererMode;
-      let includeWorkingTree = options.workingTree !== false && options.workingTree !== 'false';
+      let rendererMode: RendererMode = 'deterministic';
       let startNow = true;
 
       if (!options.nonInteractive) {
         const wizard = new TerminalWizard();
         const answers = await wizard.run(storagePath);
         repoPath = answers.repoPath;
-        branchName = answers.branchName;
-        baseRef = answers.baseRef;
+        targetBranch = answers.targetBranch;
         storagePath = answers.storagePath;
         refreshScope = answers.refreshScope;
-        includeWorkingTree = answers.includeWorkingTree;
         rendererMode = answers.rendererMode;
         startNow = answers.startNow;
 
         if (answers.saveConfig) {
           const orchestrator = new BranchContextOrchestrator(storagePath);
-          const config = await orchestrator.getRegistry().loadConfig();
-          config.storage_path = storagePath;
-          config.default_base_ref = baseRef;
+          const { registry } = await orchestrator.discoverRepository(repoPath, storagePath);
+          const config = await registry.loadConfig();
+          if (storagePath) config.storage_path = storagePath;
           config.default_refresh_scope = refreshScope;
-          config.include_working_tree = includeWorkingTree;
           config.default_renderer_mode = rendererMode;
-          await orchestrator.getRegistry().saveConfig(config);
+          await registry.saveConfig(config);
           console.log('\x1b[32m✔ Configuration saved.\x1b[0m');
         }
       }
@@ -67,11 +59,17 @@ program
       }
 
       const orchestrator = new BranchContextOrchestrator(storagePath);
-      const repo = await orchestrator.discoverRepository(repoPath);
+      const { repo, registry } = await orchestrator.discoverRepository(repoPath, storagePath);
 
       // 1. Scan catalog and branches
-      const catalog = await orchestrator.getRegistry().loadCatalog();
+      const catalog = await registry.loadCatalog();
       const repoEntry = catalog.repositories.find((r) => r.repository_id === repo.repository_id);
+
+      const currentStatus = await orchestrator.getStatus({
+        repoPath,
+        branchName: targetBranch,
+        storagePath,
+      });
 
       const branchListToDisplay: Array<{
         branch_name: string;
@@ -80,14 +78,8 @@ program
         isCurrent?: boolean;
       }> = [];
 
-      const currentStatus = await orchestrator.getStatus({
-        repoPath,
-        branchName,
-        baseRef,
-      });
-
       branchListToDisplay.push({
-        branch_name: currentStatus.branch.branch_name,
+        branch_name: currentStatus.target_branch,
         status: currentStatus.evaluation.status,
         detail:
           currentStatus.evaluation.status === 'STALE_NEW_COMMITS'
@@ -100,7 +92,7 @@ program
 
       if (repoEntry) {
         for (const b of repoEntry.branches) {
-          if (b.branch_name !== currentStatus.branch.branch_name) {
+          if (b.branch_name !== currentStatus.target_branch) {
             branchListToDisplay.push({
               branch_name: b.branch_name,
               status: b.status,
@@ -113,16 +105,21 @@ program
 
       CLIFormatter.printBranchList(
         repo.name,
-        currentStatus.branch.branch_name,
-        currentStatus.branch.base_ref,
+        currentStatus.checkout_branch,
         branchListToDisplay
       );
 
       // 2. Refresh according to refresh scope
       if (refreshScope !== 'none') {
-        const results = await orchestrator.executeRefreshScope(repoPath, refreshScope, baseRef);
+        const results = await orchestrator.executeRefreshScope(
+          repoPath,
+          refreshScope,
+          targetBranch,
+          options.force,
+          storagePath
+        );
         for (const res of results) {
-          if (res.refreshed) {
+          if (res.rendered || res.strategy === 'cached') {
             CLIFormatter.printRefreshSummary(res);
           }
         }
@@ -137,26 +134,28 @@ program
 program
   .command('list')
   .description('List all repositories and branch documents')
+  .option('-r, --repo <path>', 'Repository path', '.')
   .option('-s, --storage <path>', 'Storage path')
   .action(async (options) => {
     try {
-      const storagePath = options.storage || StoragePaths.getDefaultStorePath();
-      const orchestrator = new BranchContextOrchestrator(storagePath);
-      const catalog = await orchestrator.getRegistry().loadCatalog();
+      const orchestrator = new BranchContextOrchestrator(options.storage);
+      const { repo, storePath, registry } = await orchestrator.discoverRepository(options.repo, options.storage);
+      const catalog = await registry.loadCatalog();
 
       console.log('\n========================================');
       console.log('   Branch Render Context - Catalog      ');
       console.log('========================================');
+      console.log(`Store path: \x1b[36m${storePath}\x1b[0m\n`);
 
       if (catalog.repositories.length === 0) {
-        console.log('\nNo repositories registered yet.');
+        console.log('No repositories registered yet in this storage.');
       } else {
-        for (const repo of catalog.repositories) {
-          console.log(`\nRepository: \x1b[36m${repo.name}\x1b[0m (${repo.path})`);
+        for (const r of catalog.repositories) {
+          console.log(`Repository: \x1b[36m${r.name}\x1b[0m (${r.path})`);
           console.log('─────────────────────────────────────────────────────────────────');
-          for (const b of repo.branches) {
+          for (const b of r.branches) {
             const statusFormatted = CLIFormatter.formatStatus(b.status).padEnd(25, ' ');
-            console.log(`  - ${b.branch_name.padEnd(25, ' ')} ${statusFormatted} HEAD: ${b.last_rendered_head.slice(0, 8)}`);
+            console.log(`  - ${b.branch_name.padEnd(30, ' ')} ${statusFormatted} HEAD: ${b.last_rendered_head.slice(0, 8)}`);
           }
         }
       }
@@ -170,9 +169,9 @@ program
 // --- STATUS COMMAND ---
 program
   .command('status')
-  .description('Check freshness of current branch')
+  .description('Check freshness of target branch vs checkout base branch')
   .option('-r, --repo <path>', 'Repository path', '.')
-  .option('-b, --branch <name>', 'Branch name')
+  .option('-b, --branch <name>', 'Target branch name (default: current checkout branch)')
   .option('-s, --storage <path>', 'Storage path')
   .action(async (options) => {
     try {
@@ -180,16 +179,19 @@ program
       const status = await orchestrator.getStatus({
         repoPath: options.repo,
         branchName: options.branch,
+        storagePath: options.storage,
       });
 
-      console.log(`\nRepository: \x1b[36m${status.repository.name}\x1b[0m`);
-      console.log(`Branch: \x1b[36m${status.branch.branch_name}\x1b[0m`);
-      console.log(`Base Ref: \x1b[36m${status.branch.base_ref}\x1b[0m`);
-      console.log(`Status: ${CLIFormatter.formatStatus(status.evaluation.status)}`);
-      console.log(`HEAD: ${status.evaluation.currentHead.slice(0, 8)}`);
-      console.log(`Working Tree: ${status.evaluation.workingTreeStatus.isClean ? 'clean' : 'dirty'}`);
-      console.log(`New Commits: ${status.evaluation.newCommitsCount}`);
-      console.log(`Changed Files: ${status.evaluation.changedFilesCount}\n`);
+      console.log(`\nRepository:      \x1b[36m${status.repository.name}\x1b[0m`);
+      console.log(`Target branch:   \x1b[36m${status.target_branch}\x1b[0m`);
+      console.log(`Checkout branch: \x1b[33m${status.checkout_branch}\x1b[0m`);
+      console.log(`Base branch:     \x1b[33m${status.base_branch}\x1b[0m`);
+      console.log(`Comparison:      \x1b[35m${status.comparison}\x1b[0m`);
+      console.log(`Status:          ${CLIFormatter.formatStatus(status.evaluation.status)}`);
+      console.log(`Target Commit:   ${status.target_commit.slice(0, 8)}`);
+      console.log(`Base Commit:     ${status.base_commit.slice(0, 8)}`);
+      console.log(`New Commits:     ${status.evaluation.newCommitsCount}`);
+      console.log(`Changed Files:   ${status.evaluation.changedFilesCount}\n`);
     } catch (err: any) {
       console.error(`\x1b[31mError: ${err.message}\x1b[0m`);
       process.exit(1);
@@ -199,10 +201,9 @@ program
 // --- REFRESH COMMAND ---
 program
   .command('refresh')
-  .description('Force refresh branch document')
+  .description('Refresh target branch document vs checkout base branch')
   .option('-r, --repo <path>', 'Repository path', '.')
-  .option('-b, --branch <name>', 'Branch name')
-  .option('--base <ref>', 'Base ref')
+  .option('-b, --branch <name>', 'Target branch name (default: current checkout branch)')
   .option('-s, --storage <path>', 'Storage path')
   .option('-f, --force', 'Force refresh even if fresh', false)
   .action(async (options) => {
@@ -211,8 +212,8 @@ program
       const result = await orchestrator.refreshBranch({
         repoPath: options.repo,
         branchName: options.branch,
-        baseRef: options.base,
         force: options.force,
+        storagePath: options.storage,
       });
 
       CLIFormatter.printRefreshSummary(result);
