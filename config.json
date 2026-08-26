@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "storage_path": ".",
-  "default_base_ref": "release/eagers",
+  "default_base_ref": "",
   "default_refresh_scope": "current",
   "include_working_tree": true,
   "default_renderer_mode": "deterministic",

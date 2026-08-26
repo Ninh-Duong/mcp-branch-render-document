@@ -174,7 +174,7 @@ export class BranchContextOrchestrator {
     // b. config.default_base_ref
     // c. Saved base_ref from branchRecord (if valid and !== targetBranch)
     // d. checkoutBranch (ONLY if checkoutBranch !== targetBranch)
-    // e. Smart branch prefix/suffix matching (e.g. hotfix/*-eagers -> release/eagers)
+    // e. Smart branch prefix/suffix matching (e.g. hotfix/*-service -> release/service)
     let baseCandidate: string | undefined = undefined;
 
     if (baseBranchInput && baseBranchInput.trim().length > 0) {

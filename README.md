@@ -1,60 +1,69 @@
-# Automatic PR Branch Document Renderer (Branch Render Context MCP)
+# Automatic PR Branch Context Renderer (Branch Render Context MCP)
 
-**Automatic PR Branch Document Renderer** là hệ thống MCP Server & CLI chuyên dụng giúp tự động phân tích và kết xuất ngữ cảnh PR branch / target branch so với branch hiện tại (checkout base branch), lưu trữ document cục bộ trong repo (`.branch-render-context/`), tự động cập nhật `.gitignore`, và đồng bộ lũy tiến cho AI Agent.
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
+[![MCP Protocol](https://img.shields.io/badge/MCP-Protocol%20Compliant-purple.svg)](https://modelcontextprotocol.io/)
 
----
-
-## 🎯 Điểm Nổi Bật Của Workflow Mới
-
-1. **Chỉ Cần Nhập Target Branch**:
-   - Khi repository đang checkout ở `release/eagers` và bạn chỉ định `hotfix/Eagers-BE/WCE-946-eagers`, hệ thống tự động hiểu:
-     - `baseBranch`: `release/eagers` (từ checkout hiện tại)
-     - `targetBranch`: `hotfix/Eagers-BE/WCE-946-eagers`
-     - Phép so sánh: `release/eagers..hotfix/Eagers-BE/WCE-946-eagers`
-2. **Tuyệt Đối KHÔNG Switch Branch**:
-   - Working tree của developer luôn giữ nguyên branch hiện tại. Không bao giờ tự ý `git checkout` hay `git switch`.
-3. **Target Commit Resolve Độc Lập**:
-   - Commit của target branch được resolve từ local ref hoặc remote ref (`origin/...`), không lấy nhầm HEAD hiện tại.
-4. **Cách Ly Working Tree (Clean Isolation)**:
-   - Khi target branch khác checkout branch, các thay đổi dirty trên checkout branch sẽ không bị đưa vào document của target branch.
-5. **Kho Lưu Trữ Cục Bộ Repo (`repo-local`) & Tự Động `.gitignore`**:
-   - Mặc định lưu trữ tại `<repo-root>/.branch-render-context/`.
-   - Tự động thêm `/.branch-render-context/` vào `.gitignore` một cách idempotent, không duplicate, không ghi đè rule khác.
-6. **Lưu Trữ Danh Sách Commits Đầy Đủ**:
-   - `document.json` lưu toàn bộ danh sách commits (kèm che giấu thông tin nhạy cảm - secret redaction).
-7. **Đầy Đủ Diff Metrics trong Response**:
-   - Trả về chi tiết: `rendered_commits_count`, `changed_files_count`, `insertions`, `deletions`.
+**Branch Render Context** is a specialized Model Context Protocol (MCP) server and CLI tool designed to automatically analyze and render complete Git Pull Request / Target Branch contexts relative to a base or checkout branch. It delivers cached, incremental Markdown and JSON documents directly to AI agents with zero branch switching, working tree isolation, automatic `.gitignore` management, and flexible storage cleanup options.
 
 ---
 
-## 🛠️ Hướng Dẫn Sử Dụng CLI
+## 🎯 Key Highlights & Architecture
 
-### 1. Phân tích Target Branch qua CLI
+1. **Target Branch Resolution Without Branch Switching**:
+   - When your working tree is currently on `main` or `develop` and you specify a target branch like `feature/user-auth`, the tool automatically determines:
+     - `baseBranch`: `main` (from current checkout or configured default)
+     - `targetBranch`: `feature/user-auth`
+     - Comparison: `main..feature/user-auth`
+2. **Zero Working Tree Disruption**:
+   - Developer working trees remain completely untouched. Commands like `git checkout` or `git switch` are **never** executed.
+3. **Independent Commit & Ref Resolution**:
+   - Target branch commits are resolved directly from local refs or remote tracking refs (`origin/<branch>`) without relying on the current HEAD.
+4. **Clean Working Tree Isolation**:
+   - Uncommitted dirty changes on your current checkout branch will never contaminate the rendered PR context of the target branch.
+5. **Git-Like Hierarchical Storage & Automatic `.gitignore`**:
+   - Persists documents in structured paths: `.branch-render-context/repositories/<repo-id>/branches/<branch-path>/document.json`.
+   - Automatically and idempotently adds `.branch-render-context/` to `.gitignore` without altering other user rules.
+6. **Built-in Secret Redaction & Token Optimization**:
+   - Detects and masks credentials, `.env` files, `.pem` certificates, and API tokens.
+   - Generates compact, token-efficient Markdown summaries optimized for LLM context windows.
+7. **Granular Cleanup & Concurrency Locking**:
+   - Safe multi-process locking (`.storage.lock` and `.branch.lock`).
+   - Supports 3 distinct cleanup scopes: single branch, repository-wide, and complete storage wipe.
+
+---
+
+## 🛠️ CLI Guide
+
+### 1. Render / Refresh Target Branch Context
 ```bash
-# Phân tích target branch so với branch đang checkout
-npm run branch-render:refresh -- --branch hotfix/Eagers-BE/WCE-946-eagers
+# Analyze target branch relative to the currently checked-out base branch
+npm run branch-render:refresh -- --branch feature/user-auth
+
+# Specify explicit base branch and force a full rebuild
+npm run branch-render:refresh -- --branch feature/user-auth --base develop --force
 ```
 
-Output:
+**Example Output:**
 ```text
 =================================================================
-Target branch:   hotfix/Eagers-BE/WCE-946-eagers
-Checkout branch: release/eagers
-Base branch:     release/eagers
-Comparison:      release/eagers..hotfix/Eagers-BE/WCE-946-eagers
-Target commit:   223bed2a
-Base commit:     8c702b98
+Target branch:   feature/user-auth
+Checkout branch: main
+Base branch:     main
+Comparison:      main..feature/user-auth
+Target commit:   8f3b2a1c
+Base commit:     1e4d9c7b
 Strategy:        full
 ─────────────────────────────────────────────────────────────────
 Metrics:
-- Commits:        2
-- Changed files:  2
-- Insertions:     +62
-- Deletions:      -4
+- Commits:        3
+- Changed files:  4
+- Insertions:     +142
+- Deletions:      -18
 - Worktree dirty: ignored (clean isolation)
 ─────────────────────────────────────────────────────────────────
 Document path:
-.branch-render-context/repositories/r_a13f92c1/branches/b_91a2/document.json
+.branch-render-context/repositories/r_9a2b4c1d/branches/feature/user-auth/document.json
 =================================================================
 ```
 
@@ -62,36 +71,36 @@ Document path:
 ```bash
 npm run branch-render:start
 ```
-Wizard tự động phát hiện checkout branch và hỏi bạn target branch cần render.
+The wizard detects your current checkout branch, displays existing rendered contexts, and guides you through rendering or clearing options.
 
-### 3. Kiểm Tra Freshness
+### 3. Check Freshness Status
 ```bash
-npm run branch-render:status -- --branch hotfix/Eagers-BE/WCE-946-eagers
+npm run branch-render:status -- --branch feature/user-auth
 ```
 
-### 4. Liệt Kê Danh Mục Document Đã Lưu
+### 4. List Registered Contexts
 ```bash
 npm run branch-render:list
 ```
 
-### 5. Xóa Context & Quản Lý Storage
-
+### 5. Context & Storage Cleanup
 ```bash
-# Xóa context của 1 branch cụ thể
-npm run branch-render:clear -- --branch hotfix/Eagers-BE/WCE-946-eagers
+# Scope 1: Clear context for a specific branch
+npm run branch-render:clear -- --branch feature/user-auth
 
-# Xóa tất cả branch context của repository hiện tại
+# Scope 2: Clear all branch contexts in the current repository
 npm run branch-render:clear -- --all
 
-# Xóa TOÀN BỘ storage của tool (tất cả repositories, catalog, config, indexes)
+# Scope 3: Completely clear ENTIRE storage (all repositories, catalog, config, indexes)
 npm run branch-render:clear -- --all-storage --yes
 ```
 
 ---
 
-## 🤖 MCP Server Tools
+## 🤖 MCP Server Integration
 
-Cấu hình MCP Server trong file config của bạn:
+Configure the MCP server in your AI editor or client (Claude Desktop, Cursor, Cline, Roo Code):
+
 ```json
 {
   "mcpServers": {
@@ -103,27 +112,43 @@ Cấu hình MCP Server trong file config của bạn:
 }
 ```
 
-### Danh sách Tools:
+### Available MCP Tools
 
-| Tool Name | Mô tả |
-|---|---|
-| `branch_context_start` | Khởi tạo session, quét catalog và kiểm tra target branch |
-| `branch_context_list` | Liệt kê tất cả repositories và branch documents đã đăng ký |
-| `branch_context_status` | Kiểm tra Git freshness mà không render |
-| `branch_context_get` | Đọc `document.json` với chính sách freshness (`required` mặc định, `auto`, `check_only`, `allow_stale`) |
-| `branch_context_refresh` | Trigger cập nhật lũy tiến hoặc full rebuild cho target branch |
-| `branch_context_clear` | Xóa rendered context của một branch hoặc tất cả branch trong 1 repo |
-| `branch_context_clear_storage` | Xóa TOÀN BỘ storage của tool (yêu cầu `confirm: true`) |
+| Tool Name | Parameters | Description |
+| :--- | :--- | :--- |
+| `branch_context_start` | `repo_path?`, `target_branch?`, `base_ref?`, `storage_path?` | Initializes session, discovers repository, and inspects branch state. |
+| `branch_context_list` | `repo_path?`, `storage_path?` | Lists all registered repositories and cached branch documents. |
+| `branch_context_status` | `repo_path?`, `branch?`, `base_ref?`, `storage_path?` | Evaluates Git freshness between target and base ref without rendering. |
+| `branch_context_get` | `repo_path?`, `branch?`, `freshness_mode?`, `storage_path?` | Retrieves `document.json` using specified freshness policy (`required`, `auto`, `check_only`, `allow_stale`). |
+| `branch_context_refresh` | `repo_path?`, `branch?`, `base_ref?`, `force?`, `storage_path?` | Triggers deterministic incremental update or full rebuild. |
+| `branch_context_clear` | `repo_path?`, `branch?`, `all?`, `storage_path?` | Clears rendered context for a single branch or all branches in a repository. |
+| `branch_context_clear_storage` | `confirm: boolean`, `storage_path?` | Wipes the entire storage across all repositories (requires `confirm: true`). |
 
 ---
 
-## 🧪 Testing
+## 📄 Rendered Document Structure
+
+Each rendered branch document contains both a structured JSON object (`document.json`) and an AI-friendly Markdown representation (`document.md`):
+
+- **Repository & Branch Metadata**: Unique IDs, remote URLs, comparison refs, and commit hashes.
+- **Commit History**: Full list of commits with authors, dates, subjects, and commit bodies (with secret filtering).
+- **File Changes & Diff Statistics**: Detailed file list with change status (`added`, `modified`, `deleted`, `renamed`), patch chunks, insertions, and deletions.
+- **Freshness & Checkpoint State**: Saved commit SHAs and timestamps used for ultra-fast incremental re-evaluation.
+
+---
+
+## 🧪 Development & Testing
 
 ```bash
-# Chạy Vitest test suite
+# Run Vitest test suite
 npm test
 
-# Build TypeScript
+# Build TypeScript output
 npm run build
 ```
 
+---
+
+## 📜 License
+
+MIT License. Designed for AI agentic workflows and automated coding assistants.

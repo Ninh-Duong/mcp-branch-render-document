@@ -200,7 +200,7 @@ export class GitAdapter {
     }
 
     // 3. Token / Suffix extraction from branch name
-    // Examples: "hotfix/Eagers-BE/WCE-946-eagers" -> tokens: ["eagers", "Eagers-BE"]
+    // Examples: "hotfix/payment-gateway/PAY-123-service" -> tokens: ["service", "payment-gateway"]
     const parts = targetBranch.split('/');
     const lastPart = parts[parts.length - 1] || '';
     const subParts = lastPart.split(/[-_]/);
