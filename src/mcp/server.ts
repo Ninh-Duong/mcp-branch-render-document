@@ -328,6 +328,105 @@ export function createMcpServer(customStorePath?: string): McpServer {
     }
   );
 
+  // 6. TOOL: branch_context_clear
+  server.tool(
+    'branch_context_clear',
+    'Clear and delete rendered document context for a specific branch or all branches',
+    {
+      repo_path: z.string().optional().describe('Path to git repository (default: .)'),
+      branch: z.string().optional().describe('Target branch name to clear (default: current checkout branch)'),
+      all: z.boolean().optional().default(false).describe('Clear all branch documents in the repository'),
+      storage_path: z.string().optional().describe('Custom storage path'),
+    },
+    async ({ repo_path, branch, all, storage_path }) => {
+      try {
+        const orchestrator = getOrchestrator(storage_path);
+        const result = await orchestrator.clearContext({
+          repoPath: repo_path || '.',
+          branchName: branch,
+          all,
+          storagePath: storage_path,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  success: true,
+                  cleared_count: result.clearedCount,
+                  cleared_branches: result.clearedBranches,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Error clearing branch context: ${err.message}` }],
+        };
+      }
+    }
+  );
+
+  // 7. TOOL: branch_context_clear_storage
+  server.tool(
+    'branch_context_clear_storage',
+    'Clear and delete the ENTIRE storage (all repositories, documents, config, indexes). Requires confirm: true.',
+    {
+      storage_path: z.string().optional().describe('Custom storage path'),
+      confirm: z.boolean().describe('Must be set to true to confirm complete storage wipe'),
+    },
+    async ({ storage_path, confirm }) => {
+      if (!confirm) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: 'Operation aborted: confirm must be set to true to wipe all storage.',
+            },
+          ],
+        };
+      }
+
+      try {
+        const orchestrator = getOrchestrator(storage_path);
+        const result = await orchestrator.clearStorage({
+          storagePath: storage_path,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  success: true,
+                  cleared_repository_count: result.clearedRepositoryCount,
+                  cleared_branch_count: result.clearedBranchCount,
+                  removed_entries: result.removedEntries,
+                  failed_entries: result.failedEntries,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: `Error clearing storage: ${err.message}` }],
+        };
+      }
+    }
+  );
+
   return server;
 }
 

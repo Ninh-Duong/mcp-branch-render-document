@@ -17,6 +17,7 @@
     "branch-render:list": "node scripts/ensure-dependencies.mjs && tsx src/cli/index.ts list",
     "branch-render:status": "node scripts/ensure-dependencies.mjs && tsx src/cli/index.ts status",
     "branch-render:refresh": "node scripts/ensure-dependencies.mjs && tsx src/cli/index.ts refresh",
+    "branch-render:clear": "node scripts/ensure-dependencies.mjs && tsx src/cli/index.ts clear",
     "mcp:start": "node scripts/ensure-dependencies.mjs && tsx src/index.ts",
     "test": "node scripts/ensure-dependencies.mjs && vitest run"
   },

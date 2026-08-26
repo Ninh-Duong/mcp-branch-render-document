@@ -23,9 +23,8 @@ describe('MCP Server Tools', () => {
     }
   });
 
-  it('should initialize server with tools registered', async () => {
+  it('should initialize server with tools registered including branch_context_clear', async () => {
     const server = createMcpServer(tempStore);
     expect(server).toBeDefined();
-    // Verify server created without throwing
   });
 });

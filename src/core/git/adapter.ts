@@ -164,6 +164,84 @@ export class GitAdapter {
   }
 
   /**
+   * Intelligently detect matching base branch (e.g. tracking upstream, or release/<token> matching target branch)
+   */
+  public async detectMatchingBaseBranch(repoPath: string, targetBranch: string): Promise<string | null> {
+    if (!targetBranch) return null;
+
+    // 1. Check git config branch.<targetBranch>.merge
+    try {
+      const { stdout } = await this.runGit(['config', '--get', `branch.${targetBranch}.merge`], repoPath);
+      const mergeRef = stdout.trim().replace(/^refs\/heads\//, '');
+      if (mergeRef && mergeRef !== targetBranch) {
+        try {
+          await this.resolveBranchRef(repoPath, mergeRef);
+          return mergeRef;
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // 2. Fetch all branch refs in a single fast command
+    let availableBranches: Set<string>;
+    try {
+      const { stdout } = await this.runGit(
+        ['for-each-ref', '--format=%(refname:short)', 'refs/heads/', 'refs/remotes/'],
+        repoPath
+      );
+      availableBranches = new Set(
+        stdout.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0)
+      );
+    } catch {
+      availableBranches = new Set();
+    }
+
+    // 3. Token / Suffix extraction from branch name
+    // Examples: "hotfix/Eagers-BE/WCE-946-eagers" -> tokens: ["eagers", "Eagers-BE"]
+    const parts = targetBranch.split('/');
+    const lastPart = parts[parts.length - 1] || '';
+    const subParts = lastPart.split(/[-_]/);
+
+    const candidateTokens = new Set<string>();
+    if (parts.length > 2) {
+      candidateTokens.add(parts[1]);
+      candidateTokens.add(parts[1].toLowerCase());
+    }
+    candidateTokens.add(lastPart);
+    candidateTokens.add(lastPart.toLowerCase());
+    for (const sub of subParts) {
+      if (sub.length > 2) {
+        candidateTokens.add(sub);
+        candidateTokens.add(sub.toLowerCase());
+      }
+    }
+
+    for (const token of candidateTokens) {
+      const patterns = [
+        `release/${token}`,
+        `origin/release/${token}`,
+        `releases/${token}`,
+        `origin/releases/${token}`,
+        `staging/${token}`,
+        `origin/staging/${token}`,
+        `develop/${token}`,
+        `origin/develop/${token}`,
+      ];
+
+      for (const pattern of patterns) {
+        if (availableBranches.has(pattern) && pattern !== targetBranch) {
+          return pattern;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Get current HEAD commit hash
    */
   public async getHeadCommit(repoPath: string): Promise<string> {

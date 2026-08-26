@@ -5,6 +5,7 @@ export const BranchStateSchema = z.object({
   schema_version: z.string().default('1.0.0'),
   repository_id: z.string(),
   branch_id: z.string(),
+  branch_name: z.string().optional(),
   target_branch: z.string().optional(),
   base_branch: z.string().optional(),
   last_rendered_target_commit: z.string().default(''),

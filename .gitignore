@@ -25,6 +25,8 @@ secrets*
 branch-render-context/
 .branch-context-store/
 branch-context-store/
+storage/
+/storage/
 .mcp/branch-render/
 branch-render.local.json
 .branch-render.config.json

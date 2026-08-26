@@ -1,5 +1,5 @@
 import { GitAdapter, WorkingTreeStatus } from './git/index.js';
-import { StorageRegistry, StoragePaths, BranchLocker, GitignoreHelper } from './storage/index.js';
+import { StorageRegistry, StoragePaths, BranchLocker, GitignoreHelper, ClearStorageResult } from './storage/index.js';
 import { FreshnessEvaluator, FreshnessEvaluation } from './freshness/index.js';
 import { FullBranchAnalyzer, DeltaBranchAnalyzer } from './analyzer/index.js';
 import {
@@ -18,6 +18,7 @@ import {
 } from '../utils/hash.js';
 import { Logger } from '../utils/logger.js';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 
 export interface RenderContext {
   repo: Repository;
@@ -128,6 +129,9 @@ export class BranchContextOrchestrator {
       await registry.saveRepository(repo);
     }
 
+    // Auto-migrate any legacy branch directories to hierarchical layout
+    await registry.migrateLegacyBranchDirs(repoId);
+
     return { repo, storePath, registry };
   }
 
@@ -150,37 +154,65 @@ export class BranchContextOrchestrator {
     }
 
     const checkoutBranch = checkout.branchName;
-    let baseBranch = checkoutBranch;
-    let baseCommit = checkout.headCommit;
+    const config = await registry.loadConfig();
 
-    if (baseBranchInput && baseBranchInput.trim().length > 0) {
-      const resolvedBase = await this.git.resolveBranchRef(repo.path, baseBranchInput.trim());
-      baseBranch = baseBranchInput.trim();
-      baseCommit = resolvedBase.commit;
-    }
-
-    // Target branch defaults to checkout branch if not provided
+    // 1. Determine target branch (defaults to checkout branch)
     const targetBranch = targetBranchInput && targetBranchInput.trim().length > 0
       ? targetBranchInput.trim()
       : checkoutBranch;
 
-    // Resolve target commit independently from target branch ref
-    let targetCommit: string;
-    if (targetBranch === checkoutBranch && !baseBranchInput) {
-      targetCommit = baseCommit;
-    } else {
-      const resolvedTarget = await this.git.resolveBranchRef(repo.path, targetBranch);
-      targetCommit = resolvedTarget.commit;
-    }
-
-    const config = await registry.loadConfig();
-    const workingTreeStatus = await this.git.getWorkingTreeStatus(repo.path, config.secret_patterns);
+    // 2. Resolve target commit independently
+    const resolvedTarget = await this.git.resolveBranchRef(repo.path, targetBranch);
+    const targetCommit = resolvedTarget.commit;
 
     const branchId = generateBranchId(targetBranch);
     const documentId = generateDocumentId(repo.repository_id, branchId);
+    const existingBranchRecord = await registry.getBranch(repo.repository_id, targetBranch);
+
+    // 3. Resolve base candidate with strict priority:
+    // a. Explicit baseBranchInput
+    // b. config.default_base_ref
+    // c. Saved base_ref from branchRecord (if valid and !== targetBranch)
+    // d. checkoutBranch (ONLY if checkoutBranch !== targetBranch)
+    // e. Smart branch prefix/suffix matching (e.g. hotfix/*-eagers -> release/eagers)
+    let baseCandidate: string | undefined = undefined;
+
+    if (baseBranchInput && baseBranchInput.trim().length > 0) {
+      baseCandidate = baseBranchInput.trim();
+    } else if (config.default_base_ref && config.default_base_ref.trim().length > 0) {
+      baseCandidate = config.default_base_ref.trim();
+    } else if (
+      existingBranchRecord?.base_ref &&
+      existingBranchRecord.base_ref.trim().length > 0 &&
+      existingBranchRecord.base_ref !== targetBranch
+    ) {
+      baseCandidate = existingBranchRecord.base_ref.trim();
+    } else if (checkoutBranch !== targetBranch) {
+      baseCandidate = checkoutBranch;
+    } else {
+      // Intelligently check matching upstream or release branch
+      const detected = await this.git.detectMatchingBaseBranch(repo.path, targetBranch);
+      if (detected) {
+        baseCandidate = detected;
+      }
+    }
+
+    if (!baseCandidate || baseCandidate === targetBranch) {
+      throw new Error(
+        `Cannot determine a valid base branch for target "${targetBranch}". ` +
+        `Target and base branch cannot be the same. ` +
+        `Please specify --base <baseBranch> or configure "default_base_ref" in config.json.`
+      );
+    }
+
+    const resolvedBase = await this.git.resolveBranchRef(repo.path, baseCandidate);
+    const baseBranch = baseCandidate;
+    const baseCommit = resolvedBase.commit;
+
+    const workingTreeStatus = await this.git.getWorkingTreeStatus(repo.path, config.secret_patterns);
 
     // Save/update branch record
-    let branchRecord = await registry.getBranch(repo.repository_id, branchId);
+    let branchRecord = existingBranchRecord;
     const now = new Date().toISOString();
     if (!branchRecord) {
       branchRecord = {
@@ -190,7 +222,7 @@ export class BranchContextOrchestrator {
         branch_name: targetBranch,
         base_ref: baseBranch,
         document_id: documentId,
-        document_path: 'document.json',
+        document_path: StoragePaths.getRelativeDocumentJsonPath(repo.repository_id, targetBranch),
         status: 'active',
         created_at: now,
         updated_at: now,
@@ -198,6 +230,7 @@ export class BranchContextOrchestrator {
       await registry.saveBranch(branchRecord);
     } else {
       branchRecord.base_ref = baseBranch;
+      branchRecord.document_path = StoragePaths.getRelativeDocumentJsonPath(repo.repository_id, targetBranch);
       branchRecord.updated_at = now;
       await registry.saveBranch(branchRecord);
     }
@@ -229,8 +262,8 @@ export class BranchContextOrchestrator {
     );
     const registry = new StorageRegistry(ctx.storePath);
 
-    const existingState = await registry.getState(ctx.repo.repository_id, ctx.branchId);
-    const existingDoc = await registry.getDocument(ctx.repo.repository_id, ctx.branchId);
+    const existingState = await registry.getState(ctx.repo.repository_id, ctx.targetBranch);
+    const existingDoc = await registry.getDocument(ctx.repo.repository_id, ctx.targetBranch);
     const config = await registry.loadConfig();
 
     const evaluation = await this.freshnessEvaluator.evaluate({
@@ -238,6 +271,7 @@ export class BranchContextOrchestrator {
       targetCommit: ctx.targetCommit,
       baseCommit: ctx.baseCommit,
       targetBranch: ctx.targetBranch,
+      baseBranch: ctx.baseBranch,
       checkoutBranch: ctx.checkoutBranch,
       workingTreeStatus: ctx.workingTreeStatus,
       previousState: existingState,
@@ -245,12 +279,13 @@ export class BranchContextOrchestrator {
     });
 
     const now = new Date().toISOString();
-    const docPath = StoragePaths.getDocumentJsonPath(ctx.storePath, ctx.repo.repository_id, ctx.branchId);
+    const docPath = StoragePaths.getDocumentJsonPath(ctx.storePath, ctx.repo.repository_id, ctx.targetBranch);
 
     const state: BranchState = existingState || {
       schema_version: '1.0.0',
       repository_id: ctx.repo.repository_id,
       branch_id: ctx.branchId,
+      branch_name: ctx.targetBranch,
       target_branch: ctx.targetBranch,
       base_branch: ctx.baseBranch,
       last_rendered_target_commit: '',
@@ -283,7 +318,7 @@ export class BranchContextOrchestrator {
       branch_name: ctx.targetBranch,
       base_ref: ctx.baseBranch,
       document_id: ctx.documentId,
-      document_path: docPath,
+      document_path: StoragePaths.getRelativeDocumentJsonPath(ctx.repo.repository_id, ctx.targetBranch),
       status: 'active',
       created_at: now,
       updated_at: now,
@@ -334,30 +369,37 @@ export class BranchContextOrchestrator {
     const lockPath = StoragePaths.getBranchLockPath(
       ctx.storePath,
       ctx.repo.repository_id,
-      ctx.branchId
+      ctx.targetBranch
     );
 
     const unlock = await BranchLocker.acquireLock(lockPath);
 
     try {
-      const existingState = await registry.getState(ctx.repo.repository_id, ctx.branchId);
-      const existingDoc = await registry.getDocument(ctx.repo.repository_id, ctx.branchId);
+      const existingState = await registry.getState(ctx.repo.repository_id, ctx.targetBranch);
+      const existingDoc = await registry.getDocument(ctx.repo.repository_id, ctx.targetBranch);
 
       const evaluation = await this.freshnessEvaluator.evaluate({
         repoPath: ctx.repo.path,
         targetCommit: ctx.targetCommit,
         baseCommit: ctx.baseCommit,
         targetBranch: ctx.targetBranch,
+        baseBranch: ctx.baseBranch,
         checkoutBranch: ctx.checkoutBranch,
         workingTreeStatus: ctx.workingTreeStatus,
         previousState: existingState,
         secretPatterns: config.secret_patterns,
       });
 
-      const docPath = StoragePaths.getDocumentJsonPath(ctx.storePath, ctx.repo.repository_id, ctx.branchId);
+      const docPath = StoragePaths.getDocumentJsonPath(ctx.storePath, ctx.repo.repository_id, ctx.targetBranch);
 
       // If already FRESH and not forced, return cached document
-      if (evaluation.status === 'FRESH' && !options.force && existingDoc && existingState) {
+      if (
+        evaluation.status === 'FRESH' &&
+        !options.force &&
+        existingDoc &&
+        existingState &&
+        existingDoc.source.base_branch === ctx.baseBranch
+      ) {
         const branch: Branch = {
           schema_version: '1.0.0',
           repository_id: ctx.repo.repository_id,
@@ -365,7 +407,7 @@ export class BranchContextOrchestrator {
           branch_name: ctx.targetBranch,
           base_ref: ctx.baseBranch,
           document_id: ctx.documentId,
-          document_path: docPath,
+          document_path: StoragePaths.getRelativeDocumentJsonPath(ctx.repo.repository_id, ctx.targetBranch),
           status: 'active',
           created_at: existingDoc.freshness.rendered_at,
           updated_at: new Date().toISOString(),
@@ -464,7 +506,7 @@ export class BranchContextOrchestrator {
           evidence_refs: existingDoc!.evidence_refs || [],
         };
 
-        await registry.appendHistory(ctx.repo.repository_id, ctx.branchId, {
+        await registry.appendHistory(ctx.repo.repository_id, ctx.targetBranch, {
           type: 'updated',
           timestamp: now,
           from_head: lastTarget,
@@ -521,7 +563,7 @@ export class BranchContextOrchestrator {
           evidence_refs: [],
         };
 
-        await registry.appendHistory(ctx.repo.repository_id, ctx.branchId, {
+        await registry.appendHistory(ctx.repo.repository_id, ctx.targetBranch, {
           type: existingDoc ? 'rebuild_required' : 'created',
           timestamp: now,
           head: ctx.targetCommit,
@@ -536,6 +578,7 @@ export class BranchContextOrchestrator {
         schema_version: '1.0.0',
         repository_id: ctx.repo.repository_id,
         branch_id: ctx.branchId,
+        branch_name: ctx.targetBranch,
         target_branch: ctx.targetBranch,
         base_branch: ctx.baseBranch,
         last_rendered_target_commit: ctx.targetCommit,
@@ -572,7 +615,7 @@ export class BranchContextOrchestrator {
         branch_name: ctx.targetBranch,
         base_ref: ctx.baseBranch,
         document_id: ctx.documentId,
-        document_path: docPath,
+        document_path: StoragePaths.getRelativeDocumentJsonPath(ctx.repo.repository_id, ctx.targetBranch),
         status: 'active',
         created_at: now,
         updated_at: now,
@@ -614,11 +657,12 @@ export class BranchContextOrchestrator {
         schema_version: '1.0.0',
         repository_id: ctx.repo.repository_id,
         branch_id: ctx.branchId,
+        branch_name: ctx.targetBranch,
         target_branch: ctx.targetBranch,
         base_branch: ctx.baseBranch,
-        last_rendered_target_commit: (await registry.getState(ctx.repo.repository_id, ctx.branchId))?.last_rendered_target_commit || '',
+        last_rendered_target_commit: (await registry.getState(ctx.repo.repository_id, ctx.targetBranch))?.last_rendered_target_commit || '',
         current_target_commit: ctx.targetCommit,
-        last_rendered_base_commit: (await registry.getState(ctx.repo.repository_id, ctx.branchId))?.last_rendered_base_commit || '',
+        last_rendered_base_commit: (await registry.getState(ctx.repo.repository_id, ctx.targetBranch))?.last_rendered_base_commit || '',
         current_base_commit: ctx.baseCommit,
         last_rendered_worktree_fingerprint: '',
         current_worktree_fingerprint: ctx.workingTreeStatus.fingerprint,
@@ -629,19 +673,19 @@ export class BranchContextOrchestrator {
         rendered_changed_files_count: 0,
         rendered_insertions: 0,
         rendered_deletions: 0,
-        last_rendered_head: (await registry.getState(ctx.repo.repository_id, ctx.branchId))?.last_rendered_head || '',
+        last_rendered_head: (await registry.getState(ctx.repo.repository_id, ctx.targetBranch))?.last_rendered_head || '',
         current_head: ctx.targetCommit,
         new_commits_count: 0,
         changed_files_count: 0,
         last_checked_at: new Date().toISOString(),
-        last_rendered_at: (await registry.getState(ctx.repo.repository_id, ctx.branchId))?.last_rendered_at || new Date().toISOString(),
+        last_rendered_at: (await registry.getState(ctx.repo.repository_id, ctx.targetBranch))?.last_rendered_at || new Date().toISOString(),
         analyzer_version: '1.0.0',
         renderer_version: '1.0.0',
         error: err.message,
       };
 
       await registry.saveState(failedState);
-      await registry.appendHistory(ctx.repo.repository_id, ctx.branchId, {
+      await registry.appendHistory(ctx.repo.repository_id, ctx.targetBranch, {
         type: 'update_failed',
         timestamp: new Date().toISOString(),
         error: err.message,
@@ -661,7 +705,8 @@ export class BranchContextOrchestrator {
     scope: RefreshScope,
     targetBranch?: string,
     force: boolean = false,
-    storagePath?: string
+    storagePath?: string,
+    baseRef?: string
   ): Promise<BranchContextResult[]> {
     const results: BranchContextResult[] = [];
     const { repo, storePath, registry } = await this.discoverRepository(repoPath, storagePath);
@@ -670,6 +715,7 @@ export class BranchContextOrchestrator {
       const result = await this.refreshBranch({
         repoPath: repo.path,
         branchName: targetBranch,
+        baseRef,
         force,
         storagePath: storePath,
       });
@@ -683,6 +729,7 @@ export class BranchContextOrchestrator {
           const status = await this.getStatus({
             repoPath: repo.path,
             branchName: branchEntry.branch_name,
+            baseRef,
             storagePath: storePath,
           });
 
@@ -690,6 +737,7 @@ export class BranchContextOrchestrator {
             const refreshed = await this.refreshBranch({
               repoPath: repo.path,
               branchName: branchEntry.branch_name,
+              baseRef,
               force,
               storagePath: storePath,
             });
@@ -702,6 +750,7 @@ export class BranchContextOrchestrator {
         const result = await this.refreshBranch({
           repoPath: repo.path,
           branchName: targetBranch,
+          baseRef,
           force,
           storagePath: storePath,
         });
@@ -711,11 +760,95 @@ export class BranchContextOrchestrator {
       const status = await this.getStatus({
         repoPath: repo.path,
         branchName: targetBranch,
+        baseRef,
         storagePath: storePath,
       });
       results.push(status);
     }
 
     return results;
+  }
+
+  /**
+   * Clear branch document context (single branch or all branches in repository)
+   */
+  public async clearContext(options: {
+    repoPath?: string;
+    branchName?: string;
+    all?: boolean;
+    storagePath?: string;
+  } = {}): Promise<{ clearedCount: number; clearedBranches: string[] }> {
+    const { repo, storePath, registry } = await this.discoverRepository(
+      options.repoPath || '.',
+      options.storagePath
+    );
+    const catalog = await registry.loadCatalog();
+    const repoEntry = catalog.repositories.find((r) => r.repository_id === repo.repository_id);
+
+    const clearedBranches: string[] = [];
+
+    if (options.all) {
+      if (repoEntry && repoEntry.branches.length > 0) {
+        for (const b of [...repoEntry.branches]) {
+          await registry.removeBranchDirectory(repo.repository_id, b.branch_name);
+          clearedBranches.push(b.branch_name);
+        }
+      }
+      // Also ensure branches directory is cleaned or removed
+      try {
+        const branchesDir = StoragePaths.getBranchesDir(storePath, repo.repository_id);
+        await fs.rm(branchesDir, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+      if (repoEntry) {
+        repoEntry.branches = [];
+        await registry.saveCatalog(catalog);
+      }
+    } else {
+      let targetBranch = options.branchName;
+      if (!targetBranch) {
+        const checkout = await this.git.getCurrentCheckout(repo.path);
+        if (!checkout.isDetached) {
+          targetBranch = checkout.branchName;
+        }
+      }
+
+      if (!targetBranch) {
+        throw new Error('Please specify a branch to clear or use --all.');
+      }
+
+      const deleted = await registry.removeBranchDirectory(repo.repository_id, targetBranch);
+      if (deleted) {
+        clearedBranches.push(targetBranch);
+      }
+    }
+
+    return {
+      clearedCount: clearedBranches.length,
+      clearedBranches,
+    };
+  }
+
+  /**
+   * Clear entire storage (all repositories, branches, catalog, config, indexes)
+   */
+  public async clearStorage(options: {
+    storagePath?: string;
+  } = {}): Promise<ClearStorageResult> {
+    const storePath = StoragePaths.resolveStorePath({
+      customPath: options.storagePath || this.customStorePath,
+    });
+    const registry = new StorageRegistry(storePath);
+
+    const lockPath = StoragePaths.getStorageLockPath(storePath);
+    const unlock = await BranchLocker.acquireLock(lockPath, { staleMs: 30000, retries: 5 });
+
+    try {
+      const result = await registry.clearAllStorage();
+      return result;
+    } finally {
+      await unlock();
+    }
   }
 }

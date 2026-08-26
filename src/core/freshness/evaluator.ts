@@ -12,6 +12,7 @@ export interface FreshnessEvaluationParams {
   targetCommit: string;
   baseCommit: string;
   targetBranch: string;
+  baseBranch?: string;
   checkoutBranch: string;
   workingTreeStatus: WorkingTreeStatus;
   previousState: BranchState | null;
@@ -39,6 +40,7 @@ export class FreshnessEvaluator {
       targetCommit,
       baseCommit,
       targetBranch,
+      baseBranch,
       checkoutBranch,
       workingTreeStatus,
       previousState,
@@ -85,8 +87,11 @@ export class FreshnessEvaluator {
       };
     }
 
-    // 2. Check if base commit changed
-    if (lastBaseCommit && lastBaseCommit !== baseCommit) {
+    // 2. Check if base commit or base branch changed
+    if (
+      (lastBaseCommit && lastBaseCommit !== baseCommit) ||
+      (previousState.base_branch && previousState.base_branch !== baseBranch)
+    ) {
       const newCommits = await this.git.getCommitsSince(repoPath, baseCommit, targetCommit);
       const changedFiles = await this.git.getChangedFilesSince(repoPath, baseCommit, targetCommit);
 

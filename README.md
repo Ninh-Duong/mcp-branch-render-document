@@ -74,6 +74,19 @@ npm run branch-render:status -- --branch hotfix/Eagers-BE/WCE-946-eagers
 npm run branch-render:list
 ```
 
+### 5. Xóa Context & Quản Lý Storage
+
+```bash
+# Xóa context của 1 branch cụ thể
+npm run branch-render:clear -- --branch hotfix/Eagers-BE/WCE-946-eagers
+
+# Xóa tất cả branch context của repository hiện tại
+npm run branch-render:clear -- --all
+
+# Xóa TOÀN BỘ storage của tool (tất cả repositories, catalog, config, indexes)
+npm run branch-render:clear -- --all-storage --yes
+```
+
 ---
 
 ## 🤖 MCP Server Tools
@@ -99,6 +112,8 @@ Cấu hình MCP Server trong file config của bạn:
 | `branch_context_status` | Kiểm tra Git freshness mà không render |
 | `branch_context_get` | Đọc `document.json` với chính sách freshness (`required` mặc định, `auto`, `check_only`, `allow_stale`) |
 | `branch_context_refresh` | Trigger cập nhật lũy tiến hoặc full rebuild cho target branch |
+| `branch_context_clear` | Xóa rendered context của một branch hoặc tất cả branch trong 1 repo |
+| `branch_context_clear_storage` | Xóa TOÀN BỘ storage của tool (yêu cầu `confirm: true`) |
 
 ---
 
@@ -111,3 +126,4 @@ npm test
 # Build TypeScript
 npm run build
 ```
+

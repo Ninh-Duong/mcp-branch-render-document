@@ -66,9 +66,38 @@ export class CLIFormatter {
     console.log(`- Insertions:     \x1b[32m+${result.insertions}\x1b[0m`);
     console.log(`- Deletions:      \x1b[31m-${result.deletions}\x1b[0m`);
     console.log(`- Worktree dirty: ${result.checkout_worktree_included ? 'included' : 'ignored (clean isolation)'}`);
+
+    if (result.document?.content) {
+      console.log('─────────────────────────────────────────────────────────────────');
+      console.log('Document Summary:');
+      console.log(`  \x1b[36m${result.document.content.summary || 'No summary'}\x1b[0m`);
+
+      const commits = result.document.content.commits || [];
+      if (commits.length > 0) {
+        console.log('\nCommits:');
+        commits.forEach((c) => {
+          console.log(`  - \x1b[33m${c.hash.slice(0, 8)}\x1b[0m ${c.subject} (${c.author})`);
+        });
+      }
+
+      const changes = result.document.content.changes || [];
+      if (changes.length > 0) {
+        console.log('\nChanged Files:');
+        changes.slice(0, 15).forEach((f: any) => {
+          const statusIcon = f.status === 'A' ? '\x1b[32m[A]\x1b[0m' : f.status === 'D' ? '\x1b[31m[D]\x1b[0m' : '\x1b[33m[M]\x1b[0m';
+          console.log(`  ${statusIcon} ${f.path}`);
+        });
+        if (changes.length > 15) {
+          console.log(`  ... and ${changes.length - 15} more files.`);
+        }
+      }
+    }
+
+    const mdPath = result.document_path.replace(/\.json$/, '.md');
     console.log('─────────────────────────────────────────────────────────────────');
-    console.log('Document path:');
-    console.log(`\x1b[32m${result.document_path}\x1b[0m`);
+    console.log('Generated Document Files:');
+    console.log(`- JSON (AI Agent): \x1b[32m${result.document_path}\x1b[0m`);
+    console.log(`- Markdown (Human): \x1b[36m${mdPath}\x1b[0m`);
     console.log('=================================================================\n');
   }
 }
