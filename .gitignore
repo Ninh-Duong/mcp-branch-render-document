@@ -1,0 +1,30 @@
+# Dependencies and generated build output
+node_modules/
+dist/
+coverage/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+credentials*
+secrets*
+
+# Logs and local tooling state
+*.log
+.DS_Store
+.idea/
+.vscode/*.local.json
+
+# Branch Render Context generated data and sensitive branch documents
+# The default store is outside the repository, but users may configure a local store.
+.branch-render-context/
+branch-render-context/
+.branch-context-store/
+branch-context-store/
+.mcp/branch-render/
+branch-render.local.json
+.branch-render.config.json
