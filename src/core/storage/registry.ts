@@ -34,6 +34,7 @@ export class StorageRegistry {
 
   constructor(storePath?: string) {
     this.storePath = storePath || StoragePaths.getDefaultStorePath();
+    StoragePaths.ensureStoreDirectory(this.storePath);
   }
 
   public getStorePath(): string {

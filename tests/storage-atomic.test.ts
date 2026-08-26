@@ -34,6 +34,16 @@ describe('StorageRegistry & Atomic Writer', () => {
     expect(reloaded.default_refresh_scope).toBe('all');
   });
 
+  it('should create a missing storage directory when the registry is initialized', async () => {
+    const missingStore = path.join(tempStore, 'storage');
+    await fs.rm(missingStore, { recursive: true, force: true });
+
+    const missingRegistry = new StorageRegistry(missingStore);
+
+    expect(missingRegistry.getStorePath()).toBe(missingStore);
+    expect(await fs.access(missingStore).then(() => true).catch(() => false)).toBe(true);
+  });
+
   it('should register repository, branch, and state', async () => {
     const now = new Date().toISOString();
     await registry.saveRepository({
@@ -192,4 +202,3 @@ describe('StorageRegistry & Atomic Writer', () => {
     expect(await fs.access(parentDir).then(() => true).catch(() => false)).toBe(false);
   });
 });
-

@@ -2,9 +2,12 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { BranchContextOrchestrator } from '../core/orchestrator.js';
+import { StoragePaths } from '../core/storage/paths.js';
 import { Logger } from '../utils/logger.js';
 
 export function createMcpServer(customStorePath?: string): McpServer {
+  StoragePaths.ensureStoreDirectory(customStorePath || StoragePaths.getDefaultStorePath());
+
   const server = new McpServer({
     name: 'mcp-branch-render-context',
     version: '1.1.0',

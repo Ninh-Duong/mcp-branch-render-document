@@ -73,6 +73,15 @@ export class StoragePaths {
     return StoragePaths.getRendererStorePath();
   }
 
+  /**
+   * Ensure the storage root exists before it is read or written.
+   * The directory is intentionally created at runtime because generated
+   * branch documents are excluded from source control.
+   */
+  public static ensureStoreDirectory(storePath: string): void {
+    fs.mkdirSync(storePath, { recursive: true });
+  }
+
   public static getConfigPath(storePath: string): string {
     return path.join(storePath, 'config.json').replace(/\\/g, '/');
   }
