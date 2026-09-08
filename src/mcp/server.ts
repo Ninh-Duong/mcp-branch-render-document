@@ -139,6 +139,7 @@ export function createMcpServer(customStorePath?: string): McpServer {
                   changed_files_count: status.evaluation.changedFilesCount,
                   last_rendered_at: status.state.last_rendered_at,
                   document_path: status.document_path,
+                  ai_prompt: `Please read this document file to understand what feature this branch is working on.\nDocument file: ${status.document_path}`,
                 },
                 null,
                 2
@@ -315,6 +316,7 @@ export function createMcpServer(customStorePath?: string): McpServer {
                   deletions: r.deletions,
                   checkout_worktree_included: r.checkout_worktree_included,
                   document_path: r.document_path,
+                  ai_prompt: `Please read this document file to understand what feature this branch is working on.\nDocument file: ${r.document_path}`,
                 })),
                 null,
                 2

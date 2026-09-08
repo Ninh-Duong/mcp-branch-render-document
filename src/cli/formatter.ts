@@ -98,6 +98,10 @@ export class CLIFormatter {
     console.log('Generated Document Files:');
     console.log(`- JSON (AI Agent): \x1b[32m${result.document_path}\x1b[0m`);
     console.log(`- Markdown (Human): \x1b[36m${mdPath}\x1b[0m`);
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('Prompt for AI Agent:');
+    console.log('Please read this document file to understand what feature this branch is working on.');
+    console.log(`Document file: ${result.document_path}`);
     console.log('=================================================================\n');
   }
 }
