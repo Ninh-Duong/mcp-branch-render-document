@@ -31,17 +31,18 @@ export class StoragePaths {
   }
 
   public static getGlobalStorePath(): string {
-    if (process.env.BRANCH_CONTEXT_STORE) {
-      return path.resolve(process.env.BRANCH_CONTEXT_STORE).replace(/\\/g, '/');
+    const customEnv = process.env.AI_CONTEXT_STORE || process.env.BRANCH_CONTEXT_STORE;
+    if (customEnv) {
+      return path.resolve(customEnv).replace(/\\/g, '/');
     }
 
     const homeDir = os.homedir();
     if (process.platform === 'win32') {
       const appData = process.env.LOCALAPPDATA || process.env.APPDATA || path.join(homeDir, 'AppData', 'Local');
-      return path.join(appData, 'branch-render-context').replace(/\\/g, '/');
+      return path.join(appData, 'ai-context').replace(/\\/g, '/');
     }
 
-    return path.join(homeDir, '.branch-render-context').replace(/\\/g, '/');
+    return path.join(homeDir, '.ai-context').replace(/\\/g, '/');
   }
 
   /**
@@ -62,7 +63,13 @@ export class StoragePaths {
     }
 
     if (options.mode === 'repo-local' && options.repoRoot) {
-      return path.join(path.resolve(options.repoRoot), '.branch-render-context').replace(/\\/g, '/');
+      const repoDir = path.resolve(options.repoRoot);
+      const standardPath = path.join(repoDir, 'ai-context').replace(/\\/g, '/');
+      const legacyPath = path.join(repoDir, '.branch-render-context').replace(/\\/g, '/');
+      if (fs.existsSync(legacyPath) && !fs.existsSync(standardPath)) {
+        return legacyPath;
+      }
+      return standardPath;
     }
 
     // Default: renderer-local (inside tool's storage/ directory)

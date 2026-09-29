@@ -20,7 +20,7 @@ program
   .option('-r, --repo <path>', 'Repository path', '.')
   .option('-b, --branch <name>', 'Target branch name')
   .option('--base <ref>', 'Base branch/ref')
-  .option('-s, --storage <path>', 'Storage path (default: repo-local .branch-render-context)')
+  .option('-s, --storage <path>', 'Storage path (default: repo-local ai-context)')
   .option('--refresh <scope>', 'Refresh scope (current, stale, all, none)', 'current')
   .option('-f, --force', 'Force refresh even if already fresh', false)
   .action(async (options) => {

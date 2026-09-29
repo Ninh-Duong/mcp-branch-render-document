@@ -194,6 +194,13 @@ export class BranchContextOrchestrator {
       const detected = await this.git.detectMatchingBaseBranch(repo.path, targetBranch);
       if (detected) {
         baseCandidate = detected;
+      } else if (repo.default_branch && repo.default_branch !== targetBranch) {
+        try {
+          await this.git.resolveBranchRef(repo.path, repo.default_branch);
+          baseCandidate = repo.default_branch;
+        } catch {
+          // default branch ref does not exist
+        }
       }
     }
 
@@ -362,7 +369,7 @@ export class BranchContextOrchestrator {
     const config = await registry.loadConfig();
 
     // 1. Ensure .gitignore if storage is repo-local and enabled
-    if (config.auto_update_gitignore && ctx.storePath.includes('.branch-render-context')) {
+    if (config.auto_update_gitignore && (ctx.storePath.includes('ai-context') || ctx.storePath.includes('.branch-render-context'))) {
       await GitignoreHelper.ensureBranchRenderGitignore(ctx.repo.path);
     }
 

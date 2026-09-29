@@ -65,10 +65,13 @@ describe('PR Workflow & Target vs Checkout Branch Resolution', () => {
     expect(mdContent).toContain('# Branch Context: hotfix/Eagers-BE/WCE-946-eagers');
     expect(mdContent).toContain('## 🎯 Commits (2)');
 
-    // 6. Verify target repo directory does NOT contain any .branch-render-context folder
-    const targetLocalContextPath = path.join(fixture.repoPath, '.branch-render-context');
-    const existsInTargetRepo = await fs.access(targetLocalContextPath).then(() => true).catch(() => false);
-    expect(existsInTargetRepo).toBe(false);
+    // 6. Verify target repo directory does NOT contain any ai-context or .branch-render-context folder
+    const targetLocalContextPath = path.join(fixture.repoPath, 'ai-context');
+    const targetLegacyContextPath = path.join(fixture.repoPath, '.branch-render-context');
+    const existsLocal = await fs.access(targetLocalContextPath).then(() => true).catch(() => false);
+    const existsLegacy = await fs.access(targetLegacyContextPath).then(() => true).catch(() => false);
+    expect(existsLocal).toBe(false);
+    expect(existsLegacy).toBe(false);
   });
 
   it('should resolve base from default_base_ref when checkout branch is the target branch itself', async () => {

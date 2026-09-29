@@ -21,9 +21,9 @@
    - Target branch commits are resolved directly from local refs or remote tracking refs (`origin/<branch>`) without relying on the current HEAD.
 4. **Clean Working Tree Isolation**:
    - Uncommitted dirty changes on your current checkout branch will never contaminate the rendered PR context of the target branch.
-5. **Git-Like Hierarchical Storage & Automatic `.gitignore`**:
-   - Persists documents in structured paths: `.branch-render-context/repositories/<repo-id>/branches/<branch-path>/document.json`.
-   - Automatically and idempotently adds `.branch-render-context/` to `.gitignore` without altering other user rules.
+5. **Standard `ai-context/` Storage & Automatic `.gitignore`**:
+   - Persists documents in standardized paths: `ai-context/repositories/<repo-id>/branches/<branch-path>/document.json`.
+   - Automatically and idempotently adds `/ai-context/` to `.gitignore` without altering user rules.
 6. **Built-in Secret Redaction & Token Optimization**:
    - Detects and masks credentials, `.env` files, `.pem` certificates, and API tokens.
    - Generates compact, token-efficient Markdown summaries optimized for LLM context windows.
@@ -97,9 +97,12 @@ npm run branch-render:clear -- --all-storage --yes
 
 ---
 
-## 🤖 MCP Server Integration
+## 🤖 MCP Server Integration (AI Agent Optimized)
 
-Configure the MCP server in your AI editor or client (Claude Desktop, Cursor, Cline, Roo Code):
+Designed specifically for AI coding assistants and autonomous agents (Claude Desktop, Cursor, Cline, Roo Code, Antigravity).
+
+- 📘 [AI Agent Integration Guide](docs/AI_AGENT_GUIDE.md)
+- 📜 [Agent Behavioral Rules](AGENT_RULES.md)
 
 ```json
 {
@@ -112,17 +115,36 @@ Configure the MCP server in your AI editor or client (Claude Desktop, Cursor, Cl
 }
 ```
 
-### Available MCP Tools
+### 1. Primary AI Agent Tool: `get_branch_context`
+A single 1-call tool with automatic git freshness synchronization. Returns token-efficient Markdown directly.
 
-| Tool Name | Parameters | Description |
-| :--- | :--- | :--- |
-| `branch_context_start` | `repo_path?`, `target_branch?`, `base_ref?`, `storage_path?` | Initializes session, discovers repository, and inspects branch state. |
-| `branch_context_list` | `repo_path?`, `storage_path?` | Lists all registered repositories and cached branch documents. |
-| `branch_context_status` | `repo_path?`, `branch?`, `base_ref?`, `storage_path?` | Evaluates Git freshness between target and base ref without rendering. |
-| `branch_context_get` | `repo_path?`, `branch?`, `freshness_mode?`, `storage_path?` | Retrieves `document.json` using specified freshness policy (`required`, `auto`, `check_only`, `allow_stale`). |
-| `branch_context_refresh` | `repo_path?`, `branch?`, `base_ref?`, `force?`, `storage_path?` | Triggers deterministic incremental update or full rebuild. |
-| `branch_context_clear` | `repo_path?`, `branch?`, `all?`, `storage_path?` | Clears rendered context for a single branch or all branches in a repository. |
-| `branch_context_clear_storage` | `confirm: boolean`, `storage_path?` | Wipes the entire storage across all repositories (requires `confirm: true`). |
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `branch` | `string?` | *(current checkout)* | Target branch name to analyze. |
+| `base` | `string?` | *(auto-detected)* | Base branch to compare against (`main`, `develop`, etc.). |
+| `detail` | `'summary' \| 'full'` | `'summary'` | High-signal Markdown overview vs complete structured JSON. |
+| `force_refresh`| `boolean` | `false` | Force recalculating git diff even if cache is fresh. |
+| `repo_path` | `string?` | `.` | Git repository root path. |
+
+### 2. Maintenance Tool: `manage_branch_cache`
+Consolidated tool for inspecting status, listing registered branches, and cache invalidation.
+
+- `action: "status"`: Inspect freshness status without re-rendering.
+- `action: "list"`: List all cached repositories and branches.
+- `action: "clear_branch"`: Clear cache for a specific branch.
+- `action: "clear_all_branches"`: Clear all branch contexts in the repository.
+- `action: "clear_all_storage"`: Full wipe across all repositories (`confirm: true` required).
+
+### 3. MCP Resource: `branch-context://{branch}`
+Enables clients to attach branch context as an MCP resource directly:
+- `branch-context://feature/user-auth`
+- MIME type: `text/markdown`
+
+### 4. MCP Prompts: Pre-Engineered Workflows
+- `review_pr_branch`: Pre-injects fresh branch context into a thorough code-review prompt.
+- `summarize_branch_changes`: Summarizes intent, scope, and key touched files.
+
+*(Note: Legacy tools `branch_context_get`, `branch_context_refresh`, `branch_context_status`, etc. remain available as deprecated aliases for backward compatibility).*
 
 ---
 

@@ -238,7 +238,7 @@ export class TerminalWizard {
           { name: 'renderer-local (Default: storage/ inside renderer repo)', value: 'renderer-local' },
           { name: 'global         (OS AppData / User config dir)', value: 'global' },
           { name: 'custom         (Specify custom directory path)', value: 'custom' },
-          { name: 'repo-local     (.branch-render-context/ in target repo root)', value: 'repo-local' },
+          { name: 'repo-local     (ai-context/ in target repo root)', value: 'repo-local' },
         ],
         default: 'renderer-local',
       });
@@ -252,7 +252,7 @@ export class TerminalWizard {
       } else if (storageModeChoice === 'renderer-local') {
         storagePath = StoragePaths.getRendererStorePath();
       } else if (storageModeChoice === 'repo-local') {
-        storagePath = undefined; // will resolve to repoRoot/.branch-render-context
+        storagePath = undefined; // will resolve to repoRoot/ai-context
       }
 
       rendererMode = (await select({
